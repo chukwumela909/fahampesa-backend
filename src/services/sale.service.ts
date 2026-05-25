@@ -1,0 +1,267 @@
+import type { ClientSession, Types } from 'mongoose'
+import { InventoryItemModel } from '../models/inventory-item.model.js'
+import { ProductModel } from '../models/product.model.js'
+import { SaleModel } from '../models/sale.model.js'
+import { StockMovementModel } from '../models/stock-movement.model.js'
+import type { RequestContext } from '../types/http.js'
+import { ApiError, notFound } from '../utils/api-error.js'
+import { normalizeMongo } from '../utils/serialize.js'
+import { withTransaction } from '../config/database.js'
+import { getBranchForContext } from './branch.service.js'
+import { addDebtorPurchase } from './debtor.service.js'
+import { updateLowStockAlert } from './inventory.service.js'
+import { writeAuditLog } from './audit.service.js'
+
+export interface SaleItemInput {
+  productId: Types.ObjectId
+  quantity: number
+  unitPrice: number
+  discount?: number
+}
+
+export interface CreateSaleInput {
+  items: SaleItemInput[]
+  customer?: {
+    name?: string
+    phone?: string
+    email?: string
+    debtorId?: Types.ObjectId
+  }
+  paymentMethod: 'cash' | 'mpesa' | 'bank_transfer' | 'card' | 'credit' | 'cheque' | 'other'
+  tax?: number
+  discount?: number
+  notes?: string
+}
+
+export async function listSales(context: RequestContext, branchId: Types.ObjectId) {
+  await getBranchForContext(context, branchId)
+  const sales = await SaleModel.find({
+    businessAccountId: context.businessAccountId,
+    branchId,
+    isDeleted: false
+  }).sort({ createdAt: -1 })
+  return sales.map((sale) => serializeSale(sale, context))
+}
+
+export async function createSale(
+  context: RequestContext,
+  branchId: Types.ObjectId,
+  input: CreateSaleInput,
+  requestMeta?: { ipAddress?: string; userAgent?: string }
+) {
+  if (!context.businessAccountId || !context.role) throw new ApiError(403, 'business_required', 'Business context required')
+  const businessAccountId = context.businessAccountId
+  await getBranchForContext(context, branchId)
+
+  return withTransaction(async (session) => {
+    const activeSession = session.inTransaction() ? session : undefined
+    if (input.paymentMethod === 'credit' && !input.customer?.debtorId) {
+      throw new ApiError(422, 'debtor_required', 'A debtor is required for credit sales')
+    }
+
+    const saleItems = []
+    let subtotal = 0
+    let totalCost = 0
+
+    for (const item of input.items) {
+      const product = await ProductModel.findOne({
+        _id: item.productId,
+        businessAccountId: context.businessAccountId,
+        isActive: true
+      }).session(activeSession ?? null)
+      if (!product) throw notFound('Product not found')
+
+      const inventory = await InventoryItemModel.findOne({
+        businessAccountId: context.businessAccountId,
+        branchId,
+        productId: item.productId,
+        status: { $ne: 'discontinued' }
+      }).session(activeSession ?? null)
+      if (!inventory) throw notFound('Inventory item not found for sale item')
+      if (inventory.availableQuantity < item.quantity) {
+        throw new ApiError(409, 'insufficient_stock', `Insufficient stock for ${product.name}`)
+      }
+
+      const lineSubtotal = item.quantity * item.unitPrice - (item.discount ?? 0)
+      const lineCost = item.quantity * inventory.costPrice
+      subtotal += lineSubtotal
+      totalCost += lineCost
+      saleItems.push({
+        productId: item.productId,
+        productName: product.name,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        discount: item.discount ?? 0,
+        lineSubtotal,
+        lineCost,
+        lineProfit: lineSubtotal - lineCost
+      })
+    }
+
+    const discount = input.discount ?? 0
+    const tax = input.tax ?? 0
+    const totalAmount = subtotal + tax - discount
+    if (totalAmount < 0) throw new ApiError(422, 'invalid_sale_total', 'Sale total cannot be negative')
+
+    const [sale] = await SaleModel.create(
+      [
+        {
+          businessAccountId,
+          branchId,
+          saleNumber: await nextSaleNumber(businessAccountId, activeSession),
+          items: saleItems,
+          customer: input.customer ?? {},
+          paymentMethod: input.paymentMethod,
+          subtotal,
+          tax,
+          discount,
+          totalAmount,
+          totalCost,
+          profit: totalAmount - totalCost,
+          notes: input.notes,
+          createdBy: context.userId
+        }
+      ],
+      activeSession ? { session: activeSession } : {}
+    )
+
+    for (const item of input.items) {
+      const inventory = await InventoryItemModel.findOne({
+        businessAccountId,
+        branchId,
+        productId: item.productId,
+        status: { $ne: 'discontinued' }
+      }).session(activeSession ?? null)
+      if (!inventory) throw notFound('Inventory item not found for sale item')
+
+      const previousQuantity = inventory.quantity
+      inventory.quantity -= item.quantity
+      inventory.availableQuantity = Math.max(inventory.quantity - inventory.reservedQuantity, 0)
+      inventory.stockValue = inventory.quantity * inventory.costPrice
+      inventory.status = getInventoryStatus(inventory.quantity, inventory.reorderLevel)
+      inventory.lastMovementAt = new Date()
+      inventory.version += 1
+      await inventory.save(activeSession ? { session: activeSession } : undefined)
+
+      await StockMovementModel.create(
+        [
+          {
+            businessAccountId,
+            branchId,
+            productId: item.productId,
+            movementType: 'sale',
+            quantity: item.quantity,
+            direction: 'out',
+            previousQuantity,
+            newQuantity: inventory.quantity,
+            unitCostPrice: inventory.costPrice,
+            totalValue: item.quantity * inventory.costPrice,
+            referenceType: 'sale',
+            referenceId: sale._id,
+            reason: `Sale ${sale.saleNumber}`,
+            createdBy: context.userId
+          }
+        ],
+        activeSession ? { session: activeSession } : {}
+      )
+
+      await updateLowStockAlert(businessAccountId, branchId, item.productId, inventory, activeSession)
+    }
+
+    if (input.paymentMethod === 'credit' && input.customer?.debtorId) {
+      await addDebtorPurchase(context, branchId, input.customer.debtorId, totalAmount, activeSession)
+    }
+
+    await writeAuditLog(
+      {
+        scope: 'business',
+        businessAccountId,
+        actorUserId: context.userId,
+        actorRole: context.role,
+        action: 'sale.created',
+        targetType: 'sale',
+        targetId: sale._id,
+        branchId,
+        metadata: { saleNumber: sale.saleNumber, paymentMethod: input.paymentMethod, totalAmount },
+        ipAddress: requestMeta?.ipAddress,
+        userAgent: requestMeta?.userAgent
+      },
+      activeSession
+    )
+
+    return serializeSale(sale, context)
+  })
+}
+
+export async function getSale(context: RequestContext, branchId: Types.ObjectId, saleId: Types.ObjectId) {
+  await getBranchForContext(context, branchId)
+  const sale = await SaleModel.findOne({
+    _id: saleId,
+    businessAccountId: context.businessAccountId,
+    branchId,
+    isDeleted: false
+  })
+  if (!sale) throw notFound('Sale not found')
+  return serializeSale(sale, context)
+}
+
+export async function updateSale(
+  context: RequestContext,
+  branchId: Types.ObjectId,
+  saleId: Types.ObjectId,
+  input: { customer?: CreateSaleInput['customer']; notes?: string }
+) {
+  requireManagerRole(context)
+  await getBranchForContext(context, branchId)
+  const sale = await SaleModel.findOneAndUpdate(
+    { _id: saleId, businessAccountId: context.businessAccountId, branchId, isDeleted: false },
+    { $set: { ...input }, $inc: { version: 1 } },
+    { new: true }
+  )
+  if (!sale) throw notFound('Sale not found')
+  return serializeSale(sale, context)
+}
+
+export async function deleteSale(context: RequestContext, branchId: Types.ObjectId, saleId: Types.ObjectId) {
+  requireManagerRole(context)
+  await getBranchForContext(context, branchId)
+  const sale = await SaleModel.findOneAndUpdate(
+    { _id: saleId, businessAccountId: context.businessAccountId, branchId, isDeleted: false },
+    { $set: { isDeleted: true, deletedAt: new Date(), deletedBy: context.userId }, $inc: { version: 1 } },
+    { new: true }
+  )
+  if (!sale) throw notFound('Sale not found')
+  return { deleted: true }
+}
+
+export function serializeSale(sale: { toObject(options?: unknown): unknown }, context: RequestContext) {
+  const value = normalizeMongo(sale.toObject({ versionKey: false })) as Record<string, unknown>
+  if (context.role === 'cashier') {
+    delete value.totalCost
+    delete value.profit
+    value.items = ((value.items ?? []) as Record<string, unknown>[]).map((item) => {
+      delete item.lineCost
+      delete item.lineProfit
+      return item
+    })
+  }
+  return value
+}
+
+async function nextSaleNumber(businessAccountId: Types.ObjectId, session?: ClientSession) {
+  const count = await SaleModel.countDocuments({ businessAccountId }).session(session ?? null)
+  return `SALE-${String(count + 1).padStart(6, '0')}`
+}
+
+function requireManagerRole(context: RequestContext) {
+  if (!context.businessAccountId || !context.role) throw new ApiError(403, 'business_required', 'Business context required')
+  if (context.role !== 'owner' && context.role !== 'manager') {
+    throw new ApiError(403, 'manager_required', 'Only owners and managers can update or delete sales')
+  }
+}
+
+function getInventoryStatus(quantity: number, reorderLevel: number) {
+  if (quantity <= 0) return 'out_of_stock'
+  if (reorderLevel > 0 && quantity <= reorderLevel) return 'low_stock'
+  return 'in_stock'
+}

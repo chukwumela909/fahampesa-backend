@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FahamPesa Firebase Token Client</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #f6f7fb;
+        color: #111827;
+      }
+
+      body {
+        margin: 0;
+        padding: 32px;
+      }
+
+      main {
+        max-width: 980px;
+        margin: 0 auto;
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: 28px;
+      }
+
+      p {
+        color: #4b5563;
+      }
+
+      section {
+        background: #ffffff;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        padding: 20px;
+        margin: 16px 0;
+      }
+
+      label {
+        display: block;
+        font-size: 13px;
+        font-weight: 650;
+        margin: 14px 0 6px;
+      }
+
+      input,
+      textarea {
+        width: 100%;
+        box-sizing: border-box;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        padding: 10px 12px;
+        font: inherit;
+      }
+
+      textarea {
+        min-height: 180px;
+        resize: vertical;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+        font-size: 12px;
+      }
+
+      .row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 16px;
+      }
+
+      button {
+        border: 0;
+        border-radius: 6px;
+        background: #004aad;
+        color: #ffffff;
+        font-weight: 700;
+        padding: 10px 14px;
+        cursor: pointer;
+      }
+
+      button.secondary {
+        background: #111827;
+      }
+
+      button.danger {
+        background: #b91c1c;
+      }
+
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      pre {
+        white-space: pre-wrap;
+        word-break: break-word;
+        background: #0f172a;
+        color: #d1fae5;
+        border-radius: 6px;
+        padding: 14px;
+        min-height: 48px;
+      }
+
+      .status {
+        font-weight: 700;
+      }
+
+      .muted {
+        font-size: 13px;
+        color: #64748b;
+      }
+
+      .hint {
+        margin-top: 8px;
+        font-size: 13px;
+        color: #475569;
+      }
+
+      @media (max-width: 720px) {
+        body {
+          padding: 18px;
+        }
+
+        .row {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>FahamPesa Firebase Token Client</h1>
+      <p>
+        Use this local-only test page to sign in with Firebase Auth and copy an ID token for backend API
+        testing.
+      </p>
+
+      <section>
+        <h2>Firebase Config</h2>
+        <p class="muted">This is the frontend Web SDK config. It is public client config, not Admin SDK credentials.</p>
+        <label for="firebaseConfigJson">Paste Firebase Web config JSON or JS object</label>
+        <textarea
+          id="firebaseConfigJson"
+          placeholder='const firebaseConfig = {
+  apiKey: "AIza...",
+  authDomain: "your-project.firebaseapp.com",
+  projectId: "your-project",
+  storageBucket: "your-project.appspot.com",
+  messagingSenderId: "...",
+  appId: "1:..."
+};'
+        ></textarea>
+        <p class="hint">
+          Paste the Web app config from Firebase Console, then click Apply Config. Values are saved in this browser only.
+        </p>
+        <div class="actions">
+          <button id="applyConfig" class="secondary">Apply Config</button>
+          <button id="clearConfig" class="danger">Clear Saved Config</button>
+        </div>
+        <div class="row">
+          <div>
+            <label for="apiKey">apiKey</label>
+            <input id="apiKey" placeholder="AIza..." />
+          </div>
+          <div>
+            <label for="authDomain">authDomain</label>
+            <input id="authDomain" placeholder="fahampesa-8c514.firebaseapp.com" />
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label for="projectId">projectId</label>
+            <input id="projectId" placeholder="fahampesa-8c514" />
+          </div>
+          <div>
+            <label for="appId">appId</label>
+            <input id="appId" placeholder="1:97127182300:web:..." />
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Email/Password Sign In</h2>
+        <div class="row">
+          <div>
+            <label for="email">Email</label>
+            <input id="email" type="email" autocomplete="email" placeholder="owner@example.com" />
+          </div>
+          <div>
+            <label for="password">Password</label>
+            <input id="password" type="password" autocomplete="current-password" placeholder="Password" />
+          </div>
+        </div>
+        <div class="actions">
+          <button id="initFirebase">Initialize Firebase</button>
+          <button id="signIn">Sign In</button>
+          <button id="createAccount" class="secondary">Create Test User</button>
+          <button id="refreshToken" class="secondary">Refresh Token</button>
+          <button id="signOut" class="danger">Sign Out</button>
+        </div>
+      </section>
+
+      <section>
+        <h2>Current User</h2>
+        <p>Status: <span id="status" class="status">Not initialized</span></p>
+        <pre id="userInfo">{}</pre>
+      </section>
+
+      <section>
+        <h2>ID Token</h2>
+        <div class="actions">
+          <button id="copyToken">Copy Token</button>
+          <button id="copyHeader" class="secondary">Copy Authorization Header</button>
+        </div>
+        <label for="token">Token</label>
+        <textarea id="token" readonly></textarea>
+      </section>
+
+      <section>
+        <h2>Backend Smoke Test</h2>
+        <label for="baseUrl">Backend Base URL</label>
+        <input id="baseUrl" value="http://localhost:4000" />
+        <div class="actions">
+          <button id="callMe">Call GET /api/v1/me</button>
+        </div>
+        <pre id="apiResult">{}</pre>
+      </section>
+    </main>
+
+    <script type="module">
+      import { deleteApp, initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+      import {
+        createUserWithEmailAndPassword,
+        getAuth,
+        onAuthStateChanged,
+        signInWithEmailAndPassword,
+        signOut
+      } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+
+      let app;
+      let auth;
+      let currentToken = "";
+      const CONFIG_STORAGE_KEY = "fahampesa.firebaseWebConfig";
+
+      const el = (id) => document.getElementById(id);
+
+      function firebaseConfig() {
+        return {
+          apiKey: el("apiKey").value.trim(),
+          authDomain: el("authDomain").value.trim(),
+          projectId: el("projectId").value.trim(),
+          appId: el("appId").value.trim()
+        };
+      }
+
+      function normalizeFirebaseConfig(config) {
+        return Object.fromEntries(
+          Object.entries(config).filter(([, value]) => typeof value === "string" && value.trim())
+        );
+      }
+
+      function applyConfig(config) {
+        const normalized = normalizeFirebaseConfig(config);
+        for (const key of ["apiKey", "authDomain", "projectId", "appId"]) {
+          if (normalized[key]) el(key).value = normalized[key];
+        }
+        localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(normalized));
+      }
+
+      function parseFirebaseConfigText(text) {
+        const trimmed = text.trim();
+        if (!trimmed) throw new Error("Paste the Firebase Web config first.");
+
+        const objectText = trimmed
+          .replace(/^const\s+firebaseConfig\s*=\s*/m, "")
+          .replace(/^export\s+const\s+firebaseConfig\s*=\s*/m, "")
+          .replace(/;$/, "");
+
+        const jsonish = objectText
+          .replace(/([{,]\s*)([A-Za-z_$][\w$]*)\s*:/g, '$1"$2":')
+          .replace(/'/g, '"')
+          .replace(/,\s*([}\]])/g, "$1");
+
+        return JSON.parse(jsonish);
+      }
+
+      function validateConfig(config) {
+        for (const key of ["apiKey", "authDomain", "projectId", "appId"]) {
+          if (!config[key]) throw new Error(`Firebase config is missing ${key}.`);
+        }
+      }
+
+      function setStatus(message) {
+        el("status").textContent = message;
+      }
+
+      function writeJson(target, value) {
+        el(target).textContent = JSON.stringify(value, null, 2);
+      }
+
+      async function updateToken(user, forceRefresh = false) {
+        if (!user) {
+          currentToken = "";
+          el("token").value = "";
+          writeJson("userInfo", {});
+          return;
+        }
+
+        currentToken = await user.getIdToken(forceRefresh);
+        const tokenResult = await user.getIdTokenResult(false);
+        el("token").value = currentToken;
+        writeJson("userInfo", {
+          uid: user.uid,
+          email: user.email,
+          emailVerified: user.emailVerified,
+          authTime: tokenResult.authTime,
+          issuedAtTime: tokenResult.issuedAtTime,
+          expirationTime: tokenResult.expirationTime,
+          claims: tokenResult.claims
+        });
+      }
+
+      function ensureInitialized() {
+        if (!auth) {
+          throw new Error("Initialize Firebase first.");
+        }
+      }
+
+      function loadSavedConfig() {
+        const saved = localStorage.getItem(CONFIG_STORAGE_KEY);
+        if (!saved) return;
+        applyConfig(JSON.parse(saved));
+      }
+
+      el("applyConfig").addEventListener("click", () => {
+        try {
+          applyConfig(parseFirebaseConfigText(el("firebaseConfigJson").value));
+          setStatus("Firebase config applied");
+        } catch (error) {
+          setStatus(`Error: ${error.message}`);
+        }
+      });
+
+      el("clearConfig").addEventListener("click", async () => {
+        localStorage.removeItem(CONFIG_STORAGE_KEY);
+        for (const key of ["apiKey", "authDomain", "projectId", "appId"]) {
+          el(key).value = "";
+        }
+        el("firebaseConfigJson").value = "";
+        if (app) {
+          await deleteApp(app);
+          app = undefined;
+          auth = undefined;
+        }
+        await updateToken(null);
+        setStatus("Saved Firebase config cleared");
+      });
+
+      el("initFirebase").addEventListener("click", async () => {
+        try {
+          const config = firebaseConfig();
+          validateConfig(config);
+          localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(config));
+          if (app) {
+            await deleteApp(app);
+          }
+          app = initializeApp(config);
+          auth = getAuth(app);
+          onAuthStateChanged(auth, async (user) => {
+            if (user) {
+              setStatus(`Signed in as ${user.email || user.uid}`);
+              await updateToken(user);
+            } else {
+              setStatus("Signed out");
+              await updateToken(null);
+            }
+          });
+          setStatus(auth.currentUser ? `Signed in as ${auth.currentUser.email}` : "Initialized");
+        } catch (error) {
+          setStatus(`Error: ${error.message}`);
+        }
+      });
+
+      el("signIn").addEventListener("click", async () => {
+        try {
+          ensureInitialized();
+          await signInWithEmailAndPassword(auth, el("email").value.trim(), el("password").value);
+        } catch (error) {
+          setStatus(`Error: ${error.message}`);
+        }
+      });
+
+      el("createAccount").addEventListener("click", async () => {
+        try {
+          ensureInitialized();
+          await createUserWithEmailAndPassword(auth, el("email").value.trim(), el("password").value);
+        } catch (error) {
+          setStatus(`Error: ${error.message}`);
+        }
+      });
+
+      el("refreshToken").addEventListener("click", async () => {
+        try {
+          ensureInitialized();
+          if (!auth.currentUser) throw new Error("Sign in first.");
+          await updateToken(auth.currentUser, true);
+          setStatus(`Token refreshed for ${auth.currentUser.email || auth.currentUser.uid}`);
+        } catch (error) {
+          setStatus(`Error: ${error.message}`);
+        }
+      });
+
+      el("signOut").addEventListener("click", async () => {
+        try {
+          ensureInitialized();
+          await signOut(auth);
+        } catch (error) {
+          setStatus(`Error: ${error.message}`);
+        }
+      });
+
+      el("copyToken").addEventListener("click", async () => {
+        if (!currentToken) return;
+        await navigator.clipboard.writeText(currentToken);
+        setStatus("Token copied");
+      });
+
+      el("copyHeader").addEventListener("click", async () => {
+        if (!currentToken) return;
+        await navigator.clipboard.writeText(`Authorization: Bearer ${currentToken}`);
+        setStatus("Authorization header copied");
+      });
+
+      el("callMe").addEventListener("click", async () => {
+        try {
+          if (!currentToken) throw new Error("Sign in and generate a token first.");
+          const response = await fetch(`${el("baseUrl").value.replace(/\/$/, "")}/api/v1/me`, {
+            headers: {
+              Authorization: `Bearer ${currentToken}`
+            }
+          });
+          const payload = await response.json();
+          writeJson("apiResult", { status: response.status, body: payload });
+        } catch (error) {
+          writeJson("apiResult", { error: error.message });
+        }
+      });
+
+      try {
+        loadSavedConfig();
+      } catch (error) {
+        localStorage.removeItem(CONFIG_STORAGE_KEY);
+        setStatus(`Error loading saved config: ${error.message}`);
+      }
+    </script>
+  </body>
+</html>
