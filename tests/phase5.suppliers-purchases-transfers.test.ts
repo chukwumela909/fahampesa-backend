@@ -121,6 +121,13 @@ describe('Phase 5 suppliers, purchases, and transfers', () => {
       })
     expect(missingDestination.status).toBe(422)
     expect(missingDestination.body.error.code).toBe('transfer_inventory_missing')
+    expect(missingDestination.body.error.details).toMatchObject({
+      productId: product.body.data.id,
+      productName: 'Cooking Oil 1L',
+      fromBranchId: mainBranchId,
+      toBranchId: secondBranch.body.data.id,
+      missing: 'destination'
+    })
 
     await request(app)
       .post(`/api/v1/branches/${secondBranch.body.data.id}/products`)

@@ -199,8 +199,8 @@ Fields:
 Indexes:
 
 - `{ businessAccountId: 1, isActive: 1 }`
-- sparse `{ businessAccountId: 1, barcode: 1 }`
-- sparse `{ businessAccountId: 1, sku: 1 }`
+- unique partial `{ businessAccountId: 1, barcode: 1 }` where `barcode` is a string and `isActive=true`
+- unique partial `{ businessAccountId: 1, sku: 1 }` where `sku` is a string and `isActive=true`
 - text index on `name`, `barcode`, `sku`, `category`
 
 Branch isolation is enforced through `inventory_items`, stock movements, purchases, transfers, sales, and reports. Product identity is shared so product detail can show stock per branch without guessing whether branch-local products are the same item.

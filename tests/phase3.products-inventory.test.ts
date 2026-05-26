@@ -178,6 +178,23 @@ describe('Phase 3 products and branch inventory', () => {
     expect(oversellLikeAdjustment.body.error.code).toBe('insufficient_stock')
   })
 
+  it('allows multiple products without optional barcode or SKU values', async () => {
+    const onboarded = await onboardOwner()
+    const branchId = onboarded.body.data.branch.id
+
+    const first = await createProduct(branchId, {
+      name: 'Loose Tomatoes',
+      inventory: { sellingPrice: 20 }
+    })
+    const second = await createProduct(branchId, {
+      name: 'Loose Onions',
+      inventory: { sellingPrice: 15 }
+    })
+
+    expect(first.status).toBe(201)
+    expect(second.status).toBe(201)
+  })
+
   it('hides cost and valuation fields from cashier reads and blocks cashier product writes', async () => {
     const onboarded = await onboardOwner()
     const branchId = onboarded.body.data.branch.id

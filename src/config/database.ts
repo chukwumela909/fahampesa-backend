@@ -1,9 +1,13 @@
 import mongoose from 'mongoose'
 import { env } from './env.js'
+import { ensureProductIdentityIndexes } from '../models/product.model.js'
 
 export async function connectDatabase(uri = env.MONGODB_URI) {
   mongoose.set('strictQuery', true)
   await mongoose.connect(uri)
+  if (env.NODE_ENV !== 'production') {
+    await ensureProductIdentityIndexes()
+  }
 }
 
 export async function disconnectDatabase() {

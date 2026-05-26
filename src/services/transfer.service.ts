@@ -42,7 +42,9 @@ export async function createTransfer(context: RequestContext, input: CreateTrans
       if (!product) throw notFound('Product not found')
       const source = await InventoryItemModel.findOne({ businessAccountId: context.businessAccountId, branchId: input.fromBranchId, productId: item.productId, status: { $ne: 'discontinued' } }).session(activeSession ?? null)
       const destination = await InventoryItemModel.findOne({ businessAccountId: context.businessAccountId, branchId: input.toBranchId, productId: item.productId, status: { $ne: 'discontinued' } }).session(activeSession ?? null)
-      if (!source || !destination) throw new ApiError(422, 'transfer_inventory_missing', 'Product must exist in both source and destination branch inventory')
+      if (!source || !destination) {
+        throw transferInventoryMissingError(item.productId, product.name, input.fromBranchId, input.toBranchId, Boolean(source), Boolean(destination))
+      }
       if (source.availableQuantity < item.quantity) throw new ApiError(409, 'insufficient_stock', `Insufficient stock for ${product.name}`)
       items.push({ productId: item.productId, productName: product.name, quantity: item.quantity })
     }
@@ -93,7 +95,9 @@ export async function receiveTransfer(context: RequestContext, transferId: Types
     for (const item of transfer.items) {
       const source = await InventoryItemModel.findOne({ businessAccountId: context.businessAccountId, branchId: transfer.fromBranchId, productId: item.productId, status: { $ne: 'discontinued' } }).session(activeSession ?? null)
       const destination = await InventoryItemModel.findOne({ businessAccountId: context.businessAccountId, branchId: transfer.toBranchId, productId: item.productId, status: { $ne: 'discontinued' } }).session(activeSession ?? null)
-      if (!source || !destination) throw new ApiError(422, 'transfer_inventory_missing', 'Product must exist in both source and destination branch inventory')
+      if (!source || !destination) {
+        throw transferInventoryMissingError(item.productId, item.productName, transfer.fromBranchId, transfer.toBranchId, Boolean(source), Boolean(destination))
+      }
       if (source.availableQuantity < item.quantity) throw new ApiError(409, 'insufficient_stock', `Insufficient stock for ${item.productName}`)
 
       const sourcePrevious = source.quantity
@@ -192,6 +196,16 @@ function ensureTransferBranchAccess(context: RequestContext, fromBranchId: Types
 
 function serializeTransfer(transfer: { toObject(options?: unknown): unknown }) {
   return normalizeMongo(transfer.toObject({ versionKey: false })) as Record<string, unknown>
+}
+
+function transferInventoryMissingError(productId: Types.ObjectId, productName: string, fromBranchId: Types.ObjectId, toBranchId: Types.ObjectId, hasSource: boolean, hasDestination: boolean) {
+  return new ApiError(422, 'transfer_inventory_missing', 'Product must exist in both source and destination branch inventory', {
+    productId: productId.toString(),
+    productName,
+    fromBranchId: fromBranchId.toString(),
+    toBranchId: toBranchId.toString(),
+    missing: hasSource ? 'destination' : hasDestination ? 'source' : 'both'
+  })
 }
 
 async function nextTransferNumber(businessAccountId: Types.ObjectId, session?: ClientSession) {
