@@ -9,6 +9,7 @@ This backend is ready to deploy on Coolify using the root `Dockerfile`.
 - Port: `4000`
 - Health check path: `/api/v1/health`
 - Start command: leave empty, the image uses `npm start`
+- Environment variables: mark secrets and `NODE_ENV` as runtime-only, not build-time
 
 ## Required Environment Variables
 
@@ -28,6 +29,8 @@ FIREBASE_STORAGE_BUCKET=fahampesa-8c514.appspot.com
 
 ## Notes
 
+- If Coolify warns that `NODE_ENV=production` is available at build time, turn off "Available at Buildtime" for `NODE_ENV`. The Dockerfile is also configured to install build dependencies explicitly, so TypeScript can compile even if the variable leaks into the build.
+- Do not expose Firebase credentials at build time. They are only needed when the container runs.
 - Use MongoDB Atlas or another MongoDB replica set for production. The app uses MongoDB transactions, and standalone MongoDB writes are intentionally not allowed in production.
 - Keep Firebase service account credentials server-only. Do not commit real `.env` files or service account JSON files.
 - `APP_BASE_URL` should be the public URL of this API service in Coolify.
