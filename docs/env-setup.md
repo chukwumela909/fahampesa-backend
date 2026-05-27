@@ -63,6 +63,11 @@ Do not use the Web SDK `apiKey` as a backend admin credential.
 - The Web SDK config can appear in frontend code, but the service account JSON must remain server-only.
 - Keep `FIREBASE_PRIVATE_KEY` wrapped in quotes in `.env`.
 - Preserve newline escapes as `\n` inside the private key.
+- In hosted deployment dashboards, set `FIREBASE_PRIVATE_KEY` to one of these safe formats:
+  - the service account `private_key` value with `\n` newline escapes
+  - the JSON-stringified `private_key` value
+  - a base64-encoded PEM private key
+- Do not paste the entire service account JSON into `FIREBASE_PRIVATE_KEY`; use only its `private_key` field.
 
 ## Example `.env`
 
