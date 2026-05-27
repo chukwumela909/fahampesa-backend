@@ -10,6 +10,7 @@ const envSchema = z.object({
   FIREBASE_PROJECT_ID: z.string().optional(),
   FIREBASE_CLIENT_EMAIL: z.string().optional(),
   FIREBASE_PRIVATE_KEY: z.string().optional(),
+  FIREBASE_SERVICE_ACCOUNT_PATH: z.string().optional(),
   FIREBASE_STORAGE_BUCKET: z.string().optional(),
   MONGODB_ALLOW_STANDALONE_WRITES: z
     .enum(['true', 'false'])

@@ -23,6 +23,18 @@ describe('normalizeFirebasePrivateKey', () => {
     expect(normalizeFirebasePrivateKey(encodedPem)).toBe(pem.trim())
   })
 
+  it('accepts a quoted base64-encoded PEM', () => {
+    const encodedPem = Buffer.from(pem, 'utf8').toString('base64')
+
+    expect(normalizeFirebasePrivateKey(`"${encodedPem}"`)).toBe(pem.trim())
+  })
+
+  it('accepts a service account JSON object with private_key', () => {
+    const serviceAccountJson = JSON.stringify({ private_key: escapedPem })
+
+    expect(normalizeFirebasePrivateKey(serviceAccountJson)).toBe(pem.trim())
+  })
+
   it('throws an actionable error for invalid private key values', () => {
     expect(() => normalizeFirebasePrivateKey('not-a-private-key')).toThrow('FIREBASE_PRIVATE_KEY must be a valid PEM')
   })

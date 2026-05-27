@@ -1,4 +1,6 @@
 import admin from 'firebase-admin'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { env } from './env.js'
 import type { AuthUser } from '../types/http.js'
 
@@ -9,6 +11,16 @@ export interface FirebaseTokenVerifier {
 function initFirebaseAdmin() {
   if (admin.apps.length > 0) return
 
+  const serviceAccountCredential = getServiceAccountCredential()
+  if (serviceAccountCredential) {
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccountCredential),
+      storageBucket: env.FIREBASE_STORAGE_BUCKET
+    })
+    return
+  }
+
+  const hasFirebaseServiceAccountPath = Boolean(env.FIREBASE_SERVICE_ACCOUNT_PATH)
   const firebaseAdminConfig = {
     FIREBASE_PROJECT_ID: env.FIREBASE_PROJECT_ID,
     FIREBASE_CLIENT_EMAIL: env.FIREBASE_CLIENT_EMAIL,
@@ -21,6 +33,10 @@ function initFirebaseAdmin() {
 
   if (hasFirebaseAdminConfig && missingFirebaseAdminVars.length > 0) {
     throw new Error(`Firebase Admin SDK config is incomplete. Missing: ${missingFirebaseAdminVars.join(', ')}`)
+  }
+
+  if (hasFirebaseServiceAccountPath) {
+    throw new Error('FIREBASE_SERVICE_ACCOUNT_PATH must point to a valid Firebase service account JSON file.')
   }
 
   if (env.FIREBASE_PROJECT_ID && env.FIREBASE_CLIENT_EMAIL && env.FIREBASE_PRIVATE_KEY) {
@@ -86,17 +102,52 @@ export function getFirebaseStorageBucket() {
 }
 
 function hasExplicitFirebaseAdminConfig() {
-  return Boolean(env.FIREBASE_PROJECT_ID && env.FIREBASE_CLIENT_EMAIL && env.FIREBASE_PRIVATE_KEY)
+  return Boolean(env.FIREBASE_SERVICE_ACCOUNT_PATH || (env.FIREBASE_PROJECT_ID && env.FIREBASE_CLIENT_EMAIL && env.FIREBASE_PRIVATE_KEY))
+}
+
+function getServiceAccountCredential() {
+  if (!env.FIREBASE_SERVICE_ACCOUNT_PATH) return undefined
+
+  try {
+    const serviceAccountPath = resolve(env.FIREBASE_SERVICE_ACCOUNT_PATH)
+    const serviceAccount = JSON.parse(readFileSync(serviceAccountPath, 'utf8')) as {
+      project_id?: string
+      projectId?: string
+      client_email?: string
+      clientEmail?: string
+      private_key?: string
+      privateKey?: string
+    }
+
+    const projectId = serviceAccount.project_id ?? serviceAccount.projectId
+    const clientEmail = serviceAccount.client_email ?? serviceAccount.clientEmail
+    const privateKey = serviceAccount.private_key ?? serviceAccount.privateKey
+
+    if (!projectId || !clientEmail || !privateKey) return undefined
+
+    return {
+      projectId,
+      clientEmail,
+      privateKey: normalizeFirebasePrivateKey(privateKey)
+    }
+  } catch {
+    return undefined
+  }
 }
 
 export function normalizeFirebasePrivateKey(rawPrivateKey: string) {
-  const candidates = [
+  const trimmedPrivateKey = rawPrivateKey.trim()
+  const directCandidates = [
     rawPrivateKey,
-    rawPrivateKey.trim(),
-    stripWrappingQuotes(rawPrivateKey.trim()),
-    parseJsonString(rawPrivateKey.trim()),
-    decodeBase64String(rawPrivateKey.trim())
+    trimmedPrivateKey,
+    stripWrappingQuotes(trimmedPrivateKey),
+    parseJsonPrivateKey(trimmedPrivateKey)
   ].filter((value): value is string => Boolean(value))
+
+  const candidates = [
+    ...directCandidates,
+    ...directCandidates.map((candidate) => decodeBase64String(candidate)).filter((value): value is string => Boolean(value))
+  ]
 
   for (const candidate of candidates) {
     const normalized = candidate
@@ -131,6 +182,21 @@ function parseJsonString(value: string) {
     return typeof parsed === 'string' ? parsed : undefined
   } catch {
     return undefined
+  }
+}
+
+function parseJsonPrivateKey(value: string) {
+  try {
+    const parsed = JSON.parse(value)
+
+    if (typeof parsed === 'string') return parsed
+    if (parsed && typeof parsed === 'object' && 'private_key' in parsed && typeof parsed.private_key === 'string') {
+      return parsed.private_key
+    }
+
+    return undefined
+  } catch {
+    return parseJsonString(value)
   }
 }
 
