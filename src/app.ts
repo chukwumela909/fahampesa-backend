@@ -15,6 +15,8 @@ import { billingRouter } from './routes/billing.routes.js'
 import { webhookRouter } from './routes/webhook.routes.js'
 import { adminRouter } from './routes/admin.routes.js'
 import { assetRouter } from './routes/asset.routes.js'
+import { createPublicPlatformRouter, notificationRouter, platformAdminRouter } from './routes/platform.routes.js'
+import { staffRouter } from './routes/staff.routes.js'
 import type { ProductImageStorageUploader } from './services/asset.service.js'
 
 export interface CreateAppOptions {
@@ -39,15 +41,19 @@ export function createApp(options: CreateAppOptions = {}) {
   })
 
   app.use('/api/v1/webhooks', webhookRouter)
+  app.use('/api/v1', createPublicPlatformRouter(verifier))
   app.use('/api/v1', publicAuthRouter)
   app.use('/api/v1', authMiddleware(verifier))
   app.use('/api/v1', authRouter)
   app.use('/api/v1/admin', adminRouter)
+  app.use('/api/v1/admin', platformAdminRouter)
   app.use('/api/v1/assets', assetRouter)
   app.use('/api/v1/billing', billingRouter)
   app.use('/api/v1/branches', branchRouter)
   app.use('/api/v1/reports', reportRouter)
   app.use('/api/v1/settings', settingsRouter)
+  app.use('/api/v1/notifications', notificationRouter)
+  app.use('/api/v1/staff', staffRouter)
   app.use('/api/v1/transfers', transferRouter)
 
   app.use(errorHandler)

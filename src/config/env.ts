@@ -12,6 +12,7 @@ const envSchema = z.object({
   FIREBASE_PRIVATE_KEY: z.string().optional(),
   FIREBASE_SERVICE_ACCOUNT_PATH: z.string().optional(),
   FIREBASE_STORAGE_BUCKET: z.string().optional(),
+  SUPER_ADMIN_SECRET: z.string().optional(),
   MONGODB_ALLOW_STANDALONE_WRITES: z
     .enum(['true', 'false'])
     .default('false')

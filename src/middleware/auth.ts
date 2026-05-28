@@ -27,10 +27,16 @@ export function authMiddleware(verifier: FirebaseTokenVerifier) {
         throw new ApiError(401, 'invalid_auth_token', 'Invalid authorization token')
       }
       const user = await findOrCreateUser(auth)
+      if (user.disabled) {
+        throw new ApiError(403, 'user_disabled', 'User account is disabled')
+      }
       const resolved = await resolveActiveMembership(user._id)
 
       req.context = {
-        auth,
+        auth: {
+          ...auth,
+          platformRole: auth.platformRole ?? user.platformRole ?? undefined
+        },
         userId: user._id,
         assignedBranchIds: []
       }

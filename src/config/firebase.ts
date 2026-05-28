@@ -101,8 +101,49 @@ export function getFirebaseStorageBucket() {
   return admin.storage().bucket(env.FIREBASE_STORAGE_BUCKET)
 }
 
+export async function listFirebaseAuthUsers(email?: string) {
+  initFirebaseAdmin()
+  if (email) {
+    const user = await admin.auth().getUserByEmail(email)
+    return [mapFirebaseUser(user)]
+  }
+
+  const result = await admin.auth().listUsers(1000)
+  return result.users.map(mapFirebaseUser)
+}
+
+export async function setFirebaseAuthUserDisabled(uid: string, disabled: boolean) {
+  initFirebaseAdmin()
+  const user = await admin.auth().updateUser(uid, { disabled })
+  return mapFirebaseUser(user)
+}
+
+export async function createFirebaseSuperAdmin(email: string, password: string | undefined, displayName: string) {
+  initFirebaseAdmin()
+  const user = await admin.auth().createUser({ email, password, displayName, emailVerified: true })
+  await admin.auth().setCustomUserClaims(user.uid, { platformRole: 'admin', admin: true })
+  return mapFirebaseUser(user)
+}
+
 function hasExplicitFirebaseAdminConfig() {
   return Boolean(env.FIREBASE_SERVICE_ACCOUNT_PATH || (env.FIREBASE_PROJECT_ID && env.FIREBASE_CLIENT_EMAIL && env.FIREBASE_PRIVATE_KEY))
+}
+
+function mapFirebaseUser(user: admin.auth.UserRecord) {
+  return {
+    uid: user.uid,
+    email: user.email,
+    displayName: user.displayName,
+    phoneNumber: user.phoneNumber,
+    emailVerified: user.emailVerified,
+    disabled: user.disabled,
+    metadata: {
+      creationTime: user.metadata.creationTime,
+      lastSignInTime: user.metadata.lastSignInTime,
+      lastRefreshTime: user.metadata.lastRefreshTime
+    },
+    customClaims: user.customClaims ?? {}
+  }
 }
 
 function getServiceAccountCredential() {

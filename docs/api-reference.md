@@ -43,6 +43,7 @@ Common response shapes:
 | --- | --- | --- |
 | `GET` | `/health` | Health check. |
 | `GET` | `/auth/phone-exists?phone=<E164_PHONE>` | Check whether a Firebase phone number exists before OTP. |
+| `POST` | `/create-super-admin?secret=<SUPER_ADMIN_SECRET>` | Create a platform admin user when bootstrapping. Authenticated platform admins may call this without the secret. |
 | `POST` | `/webhooks/mpesa/callback` | M-Pesa billing callback. |
 | `POST` | `/webhooks/stripe` | Stripe billing webhook. |
 
@@ -128,6 +129,18 @@ Required:
 }
 ```
 
+### `POST /create-super-admin`
+
+Requires either a platform-admin bearer token or `?secret=<SUPER_ADMIN_SECRET>`.
+
+```json
+{
+  "email": "admin@example.com",
+  "password": "strong-password",
+  "displayName": "Platform Admin"
+}
+```
+
 ## Branches
 
 All branch routes require an authenticated user with business context.
@@ -161,6 +174,85 @@ Write routes also require account write access.
     "phone": "+254711111111",
     "email": "branch@example.com"
   }
+}
+```
+
+## Staff
+
+Mounted under `/staff`.
+
+All staff routes require an authenticated user with business context. Staff management writes require account write access and owner/manager role. Two-factor endpoints operate on the caller's current membership.
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/staff?branchId=<id>&status=<status>` | List business staff memberships. |
+| `POST` | `/staff` | Create a staff user/membership. |
+| `GET` | `/staff/:staffId` | Get staff member. |
+| `PUT` | `/staff/:staffId` | Update staff member. |
+| `PATCH` | `/staff/:staffId` | Partially update staff member. |
+| `DELETE` | `/staff/:staffId` | Deactivate staff member. |
+| `POST` | `/staff/:staffId/activate` | Reactivate staff member. |
+| `GET` | `/staff/logs?staffId=<id>&limit=50` | List staff activity logs. |
+| `POST` | `/staff/logs` | Create staff activity log. |
+| `POST` | `/staff/2fa/setup` | Create a TOTP secret for the current membership. |
+| `POST` | `/staff/2fa/verify` | Verify a TOTP token and enable 2FA. |
+| `PUT` | `/staff/2fa/verify` | Same as `POST /staff/2fa/verify`. |
+| `POST` | `/staff/2fa/disable` | Disable 2FA for the current membership. |
+
+### `POST /staff`
+
+```json
+{
+  "firebaseUid": "optional-existing-firebase-uid",
+  "email": "manager@example.com",
+  "fullName": "Manager User",
+  "phone": "+254700111222",
+  "role": "manager",
+  "branchIds": ["mongo-branch-id"],
+  "permissions": ["inventory:read", "sales:read"],
+  "employeeId": "EMP-001",
+  "salary": 25000,
+  "emergencyContact": {
+    "name": "Emergency Contact",
+    "phone": "+254700222333",
+    "relationship": "Sibling"
+  }
+}
+```
+
+`role` is `manager` or `cashier` for staff creation.
+
+### `PATCH /staff/:staffId`
+
+```json
+{
+  "fullName": "Updated Name",
+  "phone": "+254700333444",
+  "role": "cashier",
+  "status": "active",
+  "branchIds": ["mongo-branch-id"],
+  "permissions": ["sales:read"],
+  "twoFactorEnabled": false
+}
+```
+
+### `POST /staff/logs`
+
+```json
+{
+  "staffId": "mongo-membership-id",
+  "action": "staff_note",
+  "description": "Completed training",
+  "severity": "info",
+  "metadata": {}
+}
+```
+
+### `POST /staff/2fa/verify`
+
+```json
+{
+  "token": "123456"
 }
 ```
 
@@ -573,6 +665,33 @@ These routes require platform admin authorization from Firebase custom claims.
 | `POST` | `/admin/payment-events/:eventId/retry` | Retry failed payment event. |
 | `GET` | `/admin/audit-logs` | Audit logs. |
 | `GET` | `/admin/payments` | Payment events. |
+| `GET` | `/admin/auth-users` | List local/auth users with stats. |
+| `GET` | `/admin/firebase-auth-users?email=<email>&includeFirestore=true` | List Firebase Auth users when Firebase Admin is configured; falls back to Mongo users. |
+| `GET` | `/admin/user-stats` | User totals and activity breakdown. |
+| `POST` | `/admin/users/:userId/disable` | Disable or re-enable a user and suspend/reactivate memberships. |
+| `GET` | `/admin/settings/platform` | Get platform settings. |
+| `POST` | `/admin/settings/platform` | Update platform settings. |
+| `GET` | `/admin/settings/notifications` | Get platform notification settings. |
+| `POST` | `/admin/settings/notifications` | Update platform notification settings. |
+| `GET` | `/admin/settings/integrations` | Get integration settings. |
+| `POST` | `/admin/settings/integrations` | Update integration settings. |
+| `GET` | `/admin/settings/admin-users` | List platform admin users. |
+| `POST` | `/admin/settings/admin-users` | Create, update, or delete a platform admin-user record. |
+| `GET` | `/admin/settings/test` | Lightweight settings route health check. |
+| `GET` | `/admin/check-branches` | Compatibility check endpoint for branch tooling. |
+| `GET` | `/admin/check-security-alerts` | Compatibility check endpoint for security-alert tooling. |
+| `GET` | `/admin/crashlytics` | Compatibility endpoint; returns empty issues unless Crashlytics integration is added. |
+| `POST` | `/admin/notifications/send` | Send/store platform announcement. |
+| `GET` | `/admin/notifications/send?announcementId=<id>` | List announcements or fetch one announcement. |
+| `GET` | `/admin/notifications/recipients?audience=<audience>` | List notification recipients. |
+
+Notification routes are also mounted under `/notifications` for client compatibility:
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `POST` | `/notifications/send` | Send/store platform announcement. |
+| `GET` | `/notifications/send?announcementId=<id>` | List announcements or fetch one announcement. |
+| `GET` | `/notifications/recipients?audience=<audience>` | List notification recipients. |
 
 ### `POST /admin/businesses/:businessAccountId/branch-limit`
 
@@ -603,10 +722,121 @@ Set `branchLimitOverride` to `null` to clear the override.
 }
 ```
 
+### `POST /admin/users/:userId/disable`
+
+`userId` may be the Mongo user ID or Firebase UID.
+
+```json
+{
+  "disabled": true
+}
+```
+
+### `POST /admin/settings/platform`
+
+```json
+{
+  "platformName": "FahamPesa",
+  "timezone": "Africa/Nairobi",
+  "defaultLanguage": "English",
+  "dataRetentionDays": 365,
+  "backupFrequency": "Daily"
+}
+```
+
+`backupFrequency` is `Hourly`, `Daily`, `Weekly`, or `Monthly`.
+
+### `POST /admin/settings/notifications`
+
+```json
+{
+  "emailEnabled": true,
+  "pushEnabled": true,
+  "slackEnabled": false,
+  "webhookUrl": "",
+  "alertThresholds": {
+    "userDropPercentage": 20,
+    "errorRatePercentage": 5,
+    "crashRatePercentage": 2
+  }
+}
+```
+
+### `POST /admin/settings/integrations`
+
+```json
+{
+  "firebase": {
+    "enabled": true,
+    "projectId": "fahampesa-8c514"
+  },
+  "mixpanel": {
+    "enabled": false,
+    "projectToken": ""
+  },
+  "posthog": {
+    "enabled": false,
+    "apiKey": "",
+    "hostUrl": "https://app.posthog.com"
+  }
+}
+```
+
+### `POST /admin/settings/admin-users`
+
+Create:
+
+```json
+{
+  "action": "create",
+  "name": "Viewer User",
+  "email": "viewer@example.com",
+  "role": "viewer"
+}
+```
+
+Update:
+
+```json
+{
+  "action": "update",
+  "id": "mongo-admin-user-id",
+  "status": "inactive"
+}
+```
+
+Delete:
+
+```json
+{
+  "action": "delete",
+  "id": "mongo-admin-user-id"
+}
+```
+
+### `POST /notifications/send`
+
+```json
+{
+  "announcementId": "release-1",
+  "announcement": {
+    "title": "Release",
+    "message": "New release is available",
+    "type": "info",
+    "channel": "email",
+    "targetAudience": "all"
+  }
+}
+```
+
+Supported audience filters currently include `all`, `all_users`, `subscribed`, `paid_users`, `free`, `free_users`, and `disabled`.
+
 ## Authorization Notes
 
 - Owner sees all active branches in the business.
 - Manager and cashier are restricted to assigned branches.
+- Staff management routes require owner or manager role.
+- Platform admin routes require `platformRole: "admin"` from Firebase custom claims or the local user record.
 - Cashier responses hide cost, profit, margin, and valuation-sensitive fields.
 - Write routes are blocked when the account is paused, revoked, or read-only because of subscription state.
 - `POST /branches/:branchId/disable` requires recent Firebase reauthentication.

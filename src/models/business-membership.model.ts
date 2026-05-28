@@ -9,7 +9,14 @@ const businessMembershipSchema = new Schema(
     assignedBranchIds: [{ type: Schema.Types.ObjectId, ref: 'Branch' }],
     permissions: [{ type: String }],
     twoFactorEnabled: { type: Boolean, default: false },
+    twoFactorSecret: { type: String, select: false },
     employeeId: { type: String, trim: true },
+    salary: { type: Number, min: 0 },
+    emergencyContact: {
+      name: { type: String, trim: true },
+      phone: { type: String, trim: true },
+      relationship: { type: String, trim: true }
+    },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true }
   },
   { timestamps: true }
