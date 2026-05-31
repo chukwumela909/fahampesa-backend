@@ -34,8 +34,7 @@ export function authMiddleware(verifier: FirebaseTokenVerifier) {
 
       req.context = {
         auth: {
-          ...auth,
-          platformRole: auth.platformRole ?? user.platformRole ?? undefined
+          ...auth
         },
         userId: user._id,
         assignedBranchIds: []

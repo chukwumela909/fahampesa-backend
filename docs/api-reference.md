@@ -46,6 +46,8 @@ Common response shapes:
 | `POST` | `/create-super-admin?secret=<SUPER_ADMIN_SECRET>` | Create a platform admin user when bootstrapping. Authenticated platform admins may call this without the secret. |
 | `POST` | `/webhooks/mpesa/callback` | M-Pesa billing callback. |
 | `POST` | `/webhooks/stripe` | Stripe billing webhook. |
+| `POST` | `/api/mpesa/callback` | Compatibility M-Pesa billing callback alias. |
+| `POST` | `/api/stripe/webhook` | Compatibility Stripe billing webhook alias. |
 
 ## Auth And Onboarding
 
@@ -622,6 +624,7 @@ Mounted under `/billing`.
 | `GET` | `/billing/subscription` | Current business subscription. |
 | `GET` | `/billing/history` | Billing/payment history. |
 | `GET` | `/billing/receipts/:subscriptionId` | Subscription receipt. |
+| `GET` | `/billing/checkout-status/:subscriptionId` | Poll checkout/subscription status. |
 | `POST` | `/billing/mpesa/stk-push` | Start M-Pesa checkout. |
 | `POST` | `/billing/stripe/checkout-session` | Start Stripe checkout. |
 
@@ -645,6 +648,21 @@ Mounted under `/billing`.
 ```
 
 `planType` is `monthly` or `yearly`.
+
+### `GET /billing/checkout-status/:subscriptionId`
+
+Returns the scoped subscription payment status for polling:
+
+```json
+{
+  "subscriptionId": "mongo-subscription-id",
+  "status": "pending",
+  "transactionId": null,
+  "planType": "monthly",
+  "amount": 2000,
+  "currency": "KSH"
+}
+```
 
 ## Platform Admin
 
@@ -836,7 +854,7 @@ Supported audience filters currently include `all`, `all_users`, `subscribed`, `
 - Owner sees all active branches in the business.
 - Manager and cashier are restricted to assigned branches.
 - Staff management routes require owner or manager role.
-- Platform admin routes require `platformRole: "admin"` from Firebase custom claims or the local user record.
+- Platform admin routes require `platformRole: "admin"` or equivalent admin/super-admin claims from the verified Firebase Auth token.
 - Cashier responses hide cost, profit, margin, and valuation-sensitive fields.
 - Write routes are blocked when the account is paused, revoked, or read-only because of subscription state.
 - `POST /branches/:branchId/disable` requires recent Firebase reauthentication.

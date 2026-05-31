@@ -120,9 +120,27 @@ export async function setFirebaseAuthUserDisabled(uid: string, disabled: boolean
 
 export async function createFirebaseSuperAdmin(email: string, password: string | undefined, displayName: string) {
   initFirebaseAdmin()
-  const user = await admin.auth().createUser({ email, password, displayName, emailVerified: true })
-  await admin.auth().setCustomUserClaims(user.uid, { platformRole: 'admin', admin: true })
-  return mapFirebaseUser(user)
+  const normalizedEmail = email.toLowerCase()
+  let user: admin.auth.UserRecord
+
+  try {
+    user = await admin.auth().getUserByEmail(normalizedEmail)
+    user = await admin.auth().updateUser(user.uid, { displayName, emailVerified: true })
+  } catch (error) {
+    const firebaseError = error as { code?: string }
+    if (firebaseError.code !== 'auth/user-not-found') throw error
+    user = await admin.auth().createUser({ email: normalizedEmail, password, displayName, emailVerified: true })
+  }
+
+  await admin.auth().setCustomUserClaims(user.uid, {
+    ...(user.customClaims ?? {}),
+    platformRole: 'admin',
+    role: 'super_admin',
+    superAdmin: true,
+    admin: true
+  })
+
+  return mapFirebaseUser(await admin.auth().getUser(user.uid))
 }
 
 function hasExplicitFirebaseAdminConfig() {

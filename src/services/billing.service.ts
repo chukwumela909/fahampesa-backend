@@ -1,4 +1,5 @@
-import type { Types } from 'mongoose'
+import { Types } from 'mongoose'
+import type Stripe from 'stripe'
 import { BusinessAccountModel } from '../models/business-account.model.js'
 import { PaymentEventModel } from '../models/payment-event.model.js'
 import { SubscriptionModel } from '../models/subscription.model.js'
@@ -6,8 +7,14 @@ import type { RequestContext } from '../types/http.js'
 import { ApiError, notFound } from '../utils/api-error.js'
 import { normalizeMongo } from '../utils/serialize.js'
 import { withTransaction } from '../config/database.js'
-import { PlaceholderMpesaProvider, PlaceholderStripeProvider } from './billing-provider.service.js'
-import type { PlanType } from '../validators/billing.validator.js'
+import {
+  DarajaMpesaProvider,
+  LiveStripeProvider,
+  normalizeKenyaPhoneNumber,
+  type MpesaProvider,
+  type StripeProvider
+} from './billing-provider.service.js'
+import type { MpesaCallbackInput, PlanType } from '../validators/billing.validator.js'
 
 const PLAN_PRICES = {
   monthly: {
@@ -20,8 +27,18 @@ const PLAN_PRICES = {
   }
 }
 
-const mpesaProvider = new PlaceholderMpesaProvider()
-const stripeProvider = new PlaceholderStripeProvider()
+let mpesaProvider: MpesaProvider = new DarajaMpesaProvider()
+let stripeProvider: StripeProvider = new LiveStripeProvider()
+
+export function setBillingProvidersForTest(providers: { mpesa?: MpesaProvider; stripe?: StripeProvider }) {
+  const previous = { mpesa: mpesaProvider, stripe: stripeProvider }
+  if (providers.mpesa) mpesaProvider = providers.mpesa
+  if (providers.stripe) stripeProvider = providers.stripe
+  return () => {
+    mpesaProvider = previous.mpesa
+    stripeProvider = previous.stripe
+  }
+}
 
 export function getPlans() {
   return {
@@ -63,13 +80,7 @@ export async function startMpesaCheckout(context: RequestContext, input: { planT
   if (account.billingRegion !== 'KENYA') throw new ApiError(422, 'mpesa_not_available', 'M-Pesa checkout is only available for Kenya accounts')
 
   const price = PLAN_PRICES[input.planType].KENYA
-  const providerResult = await mpesaProvider.createStkPush({
-    businessAccountId: account._id.toString(),
-    planType: input.planType,
-    amount: price.amount,
-    phoneNumber: input.phoneNumber
-  })
-
+  const normalizedPhoneNumber = normalizeKenyaPhoneNumber(input.phoneNumber)
   const subscription = await SubscriptionModel.create({
     businessAccountId: account._id,
     userId: context.userId,
@@ -78,11 +89,29 @@ export async function startMpesaCheckout(context: RequestContext, input: { planT
     status: 'pending',
     amount: price.amount,
     currency: price.currency,
-    checkoutRequestId: providerResult.checkoutRequestId,
-    phoneNumber: input.phoneNumber
+    phoneNumber: normalizedPhoneNumber
   })
 
-  await BusinessAccountModel.updateOne({ _id: account._id }, { $set: { subscriptionStatus: 'pending' } })
+  let providerResult
+  try {
+    providerResult = await mpesaProvider.createStkPush({
+      businessAccountId: account._id.toString(),
+      subscriptionId: subscription._id.toString(),
+      planType: input.planType,
+      amount: price.amount,
+      phoneNumber: normalizedPhoneNumber
+    })
+  } catch (error) {
+    subscription.status = 'failed'
+    await subscription.save()
+    await markAccountFailedIfNoActiveAccess(account._id)
+    throw error
+  }
+
+  subscription.checkoutRequestId = providerResult.checkoutRequestId
+  subscription.merchantRequestId = providerResult.merchantRequestId
+  await subscription.save()
+  await markAccountPendingIfNoActiveAccess(account)
 
   return {
     provider: 'mpesa',
@@ -98,14 +127,6 @@ export async function startStripeCheckout(context: RequestContext, input: { plan
   if (account.billingRegion === 'KENYA') throw new ApiError(422, 'stripe_not_available', 'Stripe checkout is only available for non-Kenya accounts')
 
   const price = PLAN_PRICES[input.planType].OTHER
-  const providerResult = await stripeProvider.createCheckoutSession({
-    businessAccountId: account._id.toString(),
-    planType: input.planType,
-    amount: price.amount,
-    successUrl: input.successUrl,
-    cancelUrl: input.cancelUrl
-  })
-
   const subscription = await SubscriptionModel.create({
     businessAccountId: account._id,
     userId: context.userId,
@@ -113,16 +134,52 @@ export async function startStripeCheckout(context: RequestContext, input: { plan
     planType: input.planType,
     status: 'pending',
     amount: price.amount,
-    currency: price.currency,
-    stripeCheckoutSessionId: providerResult.sessionId
+    currency: price.currency
   })
 
-  await BusinessAccountModel.updateOne({ _id: account._id }, { $set: { subscriptionStatus: 'pending' } })
+  let providerResult
+  try {
+    providerResult = await stripeProvider.createCheckoutSession({
+      businessAccountId: account._id.toString(),
+      subscriptionId: subscription._id.toString(),
+      userId: context.userId.toString(),
+      email: context.auth.email,
+      planType: input.planType,
+      amount: price.amount,
+      currency: price.currency,
+      successUrl: input.successUrl,
+      cancelUrl: input.cancelUrl
+    })
+  } catch (error) {
+    subscription.status = 'failed'
+    await subscription.save()
+    await markAccountFailedIfNoActiveAccess(account._id)
+    throw error
+  }
+
+  subscription.stripeCheckoutSessionId = providerResult.sessionId
+  await subscription.save()
+  await markAccountPendingIfNoActiveAccess(account)
 
   return {
     provider: 'stripe',
     subscription: serializeSubscription(subscription),
     checkout: providerResult
+  }
+}
+
+export async function getCheckoutStatus(context: RequestContext, subscriptionId: Types.ObjectId) {
+  requireBusinessContext(context)
+  const subscription = await SubscriptionModel.findOne({ _id: subscriptionId, businessAccountId: context.businessAccountId })
+  if (!subscription) throw notFound('Subscription not found')
+
+  return {
+    subscriptionId: subscription._id.toString(),
+    status: subscription.status,
+    transactionId: subscription.transactionId ?? null,
+    planType: subscription.planType,
+    amount: subscription.amount,
+    currency: subscription.currency
   }
 }
 
@@ -133,13 +190,20 @@ export async function getSubscriptionReceipt(context: RequestContext, subscripti
   return toReceipt(subscription)
 }
 
-export async function processMpesaCallback(input: { eventId?: string; checkoutRequestId: string; resultCode: number; transactionId?: string }) {
-  const eventId = input.eventId ?? `mpesa-${input.checkoutRequestId}-${input.resultCode}`
+export async function processMpesaCallback(input: MpesaCallbackInput) {
+  const eventId = input.eventId ?? `mpesa-${input.checkoutRequestId}`
   const existing = await PaymentEventModel.findOne({ provider: 'mpesa', eventId })
-  if (existing?.processingStatus === 'processed') return serializePaymentEvent(existing)
+  if (existing && existing.processingStatus !== 'received') return serializePaymentEvent(existing)
 
   const subscription = await SubscriptionModel.findOne({ checkoutRequestId: input.checkoutRequestId, provider: 'mpesa' })
-  const event = existing ?? (await PaymentEventModel.create({ provider: 'mpesa', eventId, eventType: 'mpesa.callback', rawPayload: input, subscriptionId: subscription?._id, businessAccountId: subscription?.businessAccountId }))
+  const event = existing ?? (await PaymentEventModel.create({
+    provider: 'mpesa',
+    eventId,
+    eventType: 'mpesa.callback',
+    rawPayload: input.rawPayload ?? input,
+    subscriptionId: subscription?._id,
+    businessAccountId: subscription?.businessAccountId
+  }))
 
   if (!subscription) {
     event.processingStatus = 'failed'
@@ -150,14 +214,14 @@ export async function processMpesaCallback(input: { eventId?: string; checkoutRe
   }
 
   if (input.resultCode === 0) {
-    await activateSubscription(subscription._id, input.transactionId ?? eventId)
+    await activateSubscription(subscription._id, input.transactionId ?? `MPESA-${input.checkoutRequestId}`)
     event.processingStatus = 'processed'
   } else {
     subscription.status = 'failed'
     await subscription.save()
-    await BusinessAccountModel.updateOne({ _id: subscription.businessAccountId }, { $set: { subscriptionStatus: 'failed' } })
+    await markAccountFailedIfNoActiveAccess(subscription.businessAccountId)
     event.processingStatus = 'failed'
-    event.errorMessage = `M-Pesa result code ${input.resultCode}`
+    event.errorMessage = input.resultDesc ?? `M-Pesa result code ${input.resultCode}`
   }
 
   event.subscriptionId = subscription._id
@@ -167,24 +231,54 @@ export async function processMpesaCallback(input: { eventId?: string; checkoutRe
   return serializePaymentEvent(event)
 }
 
-export async function processStripeWebhook(input: { id: string; type: string; data: { object: { id: string; payment_intent?: string } } }) {
+export async function processStripeWebhookRaw(rawBody: Buffer, signature?: string) {
+  if (!signature) throw new ApiError(400, 'missing_stripe_signature', 'Missing stripe-signature header')
+
+  let event: Stripe.Event
+  try {
+    event = stripeProvider.constructWebhookEvent(rawBody, signature)
+  } catch {
+    throw new ApiError(400, 'invalid_stripe_signature', 'Webhook signature verification failed')
+  }
+
+  return processStripeWebhook(event)
+}
+
+export async function processStripeWebhook(input: Stripe.Event) {
   const existing = await PaymentEventModel.findOne({ provider: 'stripe', eventId: input.id })
-  if (existing?.processingStatus === 'processed') return serializePaymentEvent(existing)
+  if (existing && existing.processingStatus !== 'received') return serializePaymentEvent(existing)
 
-  const sessionId = input.data.object.id
-  const subscription = await SubscriptionModel.findOne({ stripeCheckoutSessionId: sessionId, provider: 'stripe' })
-  const event = existing ?? (await PaymentEventModel.create({ provider: 'stripe', eventId: input.id, eventType: input.type, rawPayload: input, subscriptionId: subscription?._id, businessAccountId: subscription?.businessAccountId }))
+  const event = existing ?? (await PaymentEventModel.create({ provider: 'stripe', eventId: input.id, eventType: input.type, rawPayload: input }))
 
-  if (input.type !== 'checkout.session.completed') {
-    event.processingStatus = 'ignored'
-  } else if (!subscription) {
-    event.processingStatus = 'failed'
-    event.errorMessage = 'Pending subscription not found'
+  if (input.type === 'checkout.session.completed') {
+    const session = input.data.object as Stripe.Checkout.Session
+    const subscription = await findStripeSubscription(session)
+    if (!subscription) {
+      event.processingStatus = 'failed'
+      event.errorMessage = 'Pending subscription not found'
+    } else {
+      await activateSubscription(subscription._id, getStripeTransactionId(session))
+      event.subscriptionId = subscription._id
+      event.businessAccountId = subscription.businessAccountId
+      event.processingStatus = 'processed'
+    }
+  } else if (input.type === 'checkout.session.expired') {
+    const session = input.data.object as Stripe.Checkout.Session
+    const subscription = await findStripeSubscription(session)
+    if (!subscription) {
+      event.processingStatus = 'failed'
+      event.errorMessage = 'Pending subscription not found'
+    } else {
+      subscription.status = 'failed'
+      await subscription.save()
+      await markAccountFailedIfNoActiveAccess(subscription.businessAccountId)
+      event.subscriptionId = subscription._id
+      event.businessAccountId = subscription.businessAccountId
+      event.processingStatus = 'processed'
+      event.errorMessage = 'Stripe checkout session expired'
+    }
   } else {
-    await activateSubscription(subscription._id, input.data.object.payment_intent ?? input.id)
-    event.subscriptionId = subscription._id
-    event.businessAccountId = subscription.businessAccountId
-    event.processingStatus = 'processed'
+    event.processingStatus = 'ignored'
   }
 
   event.processedAt = new Date()
@@ -199,8 +293,12 @@ async function activateSubscription(subscriptionId: Types.ObjectId, transactionI
     if (!subscription) throw notFound('Subscription not found')
     if (subscription.status === 'active') return subscription
 
+    const account = await BusinessAccountModel.findById(subscription.businessAccountId).session(activeSession ?? null)
+    if (!account) throw notFound('Business account not found')
+
     const startDate = new Date()
-    const endDate = addPlanDuration(startDate, subscription.planType)
+    const baseDate = hasActivePaidAccess(account) && account.subscriptionEndsAt ? account.subscriptionEndsAt : startDate
+    const endDate = addPlanDuration(baseDate, subscription.planType)
     subscription.status = 'active'
     subscription.transactionId = transactionId
     subscription.startDate = startDate
@@ -231,6 +329,36 @@ function addPlanDuration(startDate: Date, planType: PlanType) {
   if (planType === 'monthly') endDate.setMonth(endDate.getMonth() + 1)
   else endDate.setFullYear(endDate.getFullYear() + 1)
   return endDate
+}
+
+async function findStripeSubscription(session: Stripe.Checkout.Session) {
+  const subscriptionId = session.metadata?.subscriptionId
+  if (subscriptionId && Types.ObjectId.isValid(subscriptionId)) {
+    const subscription = await SubscriptionModel.findOne({ _id: subscriptionId, provider: 'stripe' })
+    if (subscription) return subscription
+  }
+  return SubscriptionModel.findOne({ stripeCheckoutSessionId: session.id, provider: 'stripe' })
+}
+
+function getStripeTransactionId(session: Stripe.Checkout.Session) {
+  const paymentIntent = session.payment_intent
+  const paymentIntentId = typeof paymentIntent === 'string' ? paymentIntent : paymentIntent?.id
+  return `STRIPE-${paymentIntentId ?? session.id}`
+}
+
+async function markAccountPendingIfNoActiveAccess(account: { _id: Types.ObjectId; planTier?: string | null; subscriptionStatus?: string | null; subscriptionEndsAt?: Date | null }) {
+  if (hasActivePaidAccess(account)) return
+  await BusinessAccountModel.updateOne({ _id: account._id }, { $set: { subscriptionStatus: 'pending' } })
+}
+
+async function markAccountFailedIfNoActiveAccess(businessAccountId: Types.ObjectId) {
+  const account = await BusinessAccountModel.findById(businessAccountId).select('planTier subscriptionStatus subscriptionEndsAt')
+  if (!account || hasActivePaidAccess(account)) return
+  await BusinessAccountModel.updateOne({ _id: businessAccountId }, { $set: { subscriptionStatus: 'failed' } })
+}
+
+function hasActivePaidAccess(account: { planTier?: string | null; subscriptionStatus?: string | null; subscriptionEndsAt?: Date | null }) {
+  return account.planTier === 'paid' && account.subscriptionStatus === 'active' && !!account.subscriptionEndsAt && account.subscriptionEndsAt.getTime() > Date.now()
 }
 
 async function getBillingRegion(businessAccountId: Types.ObjectId) {

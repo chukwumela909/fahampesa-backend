@@ -10,6 +10,7 @@ const subscriptionSchema = new Schema(
     amount: { type: Number, required: true, min: 0 },
     currency: { type: String, enum: ['KSH', 'USD'], required: true },
     checkoutRequestId: { type: String, trim: true },
+    merchantRequestId: { type: String, trim: true },
     stripeCheckoutSessionId: { type: String, trim: true },
     transactionId: { type: String, trim: true },
     phoneNumber: { type: String, trim: true },

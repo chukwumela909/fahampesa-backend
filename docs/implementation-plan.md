@@ -15,7 +15,7 @@ Current code status:
 
 - Implemented: foundation, Firebase auth middleware, onboarding, business accounts, branches, branch products, inventory, sales, expenses, debtors, suppliers, purchase orders, transfers, reports, settings, billing placeholders/webhooks, and platform admin APIs.
 - Implemented auth/onboarding additions: phone existence lookup, onboarding status, onboarding progress save, onboarding skip, legal company fields, owner personal profile updates, and staff invitation capture.
-- Partially implemented: billing provider integration is represented by service abstractions and webhook/payment-event flows, but the project currently depends only on local service code and does not include Stripe/Daraja SDK packages.
+- Implemented: billing provider integration uses live M-Pesa Daraja HTTP calls, Stripe Checkout/Webhook SDK support, payment-event logging, and compatibility callback aliases.
 - Partially implemented: settings supports `businessProfile`, `receiptSettings`, `notificationSettings`, `deviceSettings`, and `syncSettings` as flexible objects.
 - Placeholder: `POST /branches/:branchId/products/bulk-upload` exists but returns `501 bulk_upload_not_implemented`.
 - Not implemented yet: Offline Sync routes and sync device/change-log/conflict APIs from Phase 7.

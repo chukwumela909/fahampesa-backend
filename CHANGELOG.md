@@ -4,6 +4,14 @@ All notable backend planning and implementation changes for FahamPesa will be tr
 
 This file follows a lightweight chronological format during active development.
 
+## 2026-05-29
+
+### Added
+
+- Wired live subscription billing providers for M-Pesa Daraja STK push and Stripe Checkout/Webhooks.
+- Added signed Stripe raw-body webhook handling, real M-Pesa callback parsing, callback compatibility aliases, and checkout status polling.
+- Added production payment environment validation and placeholder deployment docs.
+
 ## 2026-05-08
 
 ### Added

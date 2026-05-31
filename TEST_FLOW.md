@@ -106,7 +106,7 @@ This file tracks the test plan for each backend implementation phase. Each modul
 
 ## Phase 7: Offline Sync
 
-- [ ] Skipped temporarily; to be implemented after placeholder subscription billing.
+- [ ] Skipped temporarily; to be implemented after subscription billing stabilization.
 - [ ] Push accepts business commands, not raw database patches.
 - [ ] Stale `baseVersion` creates conflict.
 - [ ] Delete events are returned to clients.

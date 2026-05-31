@@ -8,6 +8,7 @@ import type { AuthUser } from '../src/types/http.js'
 import type { FirebaseTokenVerifier } from '../src/config/firebase.js'
 import { BusinessAccountModel } from '../src/models/business-account.model.js'
 import { PaymentEventModel } from '../src/models/payment-event.model.js'
+import { UserModel } from '../src/models/user.model.js'
 
 class FakeVerifier implements FirebaseTokenVerifier {
   constructor(private readonly users: Record<string, AuthUser>) {}
@@ -61,6 +62,15 @@ describe('Phase 9 super admin APIs', () => {
     expect(detail.status).toBe(200)
     expect(detail.body.data.account.id).toBe(businessAccountId)
     expect(detail.body.data.branches).toHaveLength(1)
+  })
+
+  it('does not grant platform admin from the local Mongo user record', async () => {
+    await onboardOwner()
+    await UserModel.findOneAndUpdate({ firebaseUid: 'owner_uid' }, { $set: { platformRole: 'admin' } })
+
+    const blocked = await request(app).get('/api/v1/admin/businesses').set('Authorization', 'Bearer owner')
+    expect(blocked.status).toBe(403)
+    expect(blocked.body.error.code).toBe('platform_admin_required')
   })
 
   it('pauses and resumes businesses with audit logs and read-only enforcement', async () => {

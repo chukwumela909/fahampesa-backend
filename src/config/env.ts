@@ -17,7 +17,38 @@ const envSchema = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((value) => value === 'true'),
-  APP_BASE_URL: z.string().url().default('http://localhost:4000')
+  APP_BASE_URL: z.string().url().default('http://localhost:4000'),
+  NEXT_PUBLIC_BASE_URL: z.string().url().optional(),
+  MPESA_SHORTCODE: z.string().trim().min(1).optional(),
+  MPESA_ENVIRONMENT: z.enum(['sandbox', 'production']).default('sandbox'),
+  MPESA_PASSKEY: z.string().trim().min(1).optional(),
+  MPESA_CONSUMER_KEY: z.string().trim().min(1).optional(),
+  MPESA_CONSUMER_SECRET: z.string().trim().min(1).optional(),
+  MPESA_CALLBACK_URL: z.string().url().optional(),
+  STRIPE_SECRET_KEY: z.string().trim().min(1).optional(),
+  STRIPE_WEBHOOK_SECRET: z.string().trim().min(1).optional()
+}).superRefine((value, ctx) => {
+  if (value.NODE_ENV !== 'production') return
+
+  const requiredKeys = [
+    'MPESA_SHORTCODE',
+    'MPESA_PASSKEY',
+    'MPESA_CONSUMER_KEY',
+    'MPESA_CONSUMER_SECRET',
+    'MPESA_CALLBACK_URL',
+    'STRIPE_SECRET_KEY',
+    'STRIPE_WEBHOOK_SECRET'
+  ] as const
+
+  for (const key of requiredKeys) {
+    if (!value[key]) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [key],
+        message: `${key} is required in production`
+      })
+    }
+  }
 })
 
 export const env = envSchema.parse(process.env)

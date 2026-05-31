@@ -69,6 +69,24 @@ Do not use the Web SDK `apiKey` as a backend admin credential.
   - a base64-encoded PEM private key
 - Do not paste the entire service account JSON into `FIREBASE_PRIVATE_KEY`; use only its `private_key` field.
 
+## Payment Variables
+
+Production requires live M-Pesa Daraja and Stripe server secrets. Keep these only in local `.env` files or deployment secrets.
+
+```env
+MPESA_ENVIRONMENT=production
+MPESA_SHORTCODE=YOUR_MPESA_SHORTCODE
+MPESA_PASSKEY=YOUR_MPESA_PASSKEY
+MPESA_CONSUMER_KEY=YOUR_MPESA_CONSUMER_KEY
+MPESA_CONSUMER_SECRET=YOUR_MPESA_CONSUMER_SECRET
+MPESA_CALLBACK_URL=https://www.fahampesa.com/api/mpesa/callback
+
+STRIPE_SECRET_KEY=sk_live_REPLACE_ME
+STRIPE_WEBHOOK_SECRET=whsec_REPLACE_ME
+```
+
+`APP_BASE_URL` should point to the backend. `NEXT_PUBLIC_BASE_URL` can point to the web app and is used for default Stripe success/cancel URLs when the client does not send explicit redirect URLs.
+
 ## Example `.env`
 
 ```env
@@ -81,5 +99,16 @@ FIREBASE_CLIENT_EMAIL=firebase-adminsdk-xxxxx@fahampesa-8c514.iam.gserviceaccoun
 FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nYOUR_KEY_CONTENT\n-----END PRIVATE KEY-----\n"
 
 APP_BASE_URL=http://localhost:4000
+NEXT_PUBLIC_BASE_URL=http://localhost:3000
 FIREBASE_STORAGE_BUCKET=fahampesa-8c514.appspot.com
+
+MPESA_ENVIRONMENT=sandbox
+MPESA_SHORTCODE=YOUR_SANDBOX_SHORTCODE
+MPESA_PASSKEY=YOUR_SANDBOX_PASSKEY
+MPESA_CONSUMER_KEY=YOUR_SANDBOX_CONSUMER_KEY
+MPESA_CONSUMER_SECRET=YOUR_SANDBOX_CONSUMER_SECRET
+MPESA_CALLBACK_URL=https://example.ngrok-free.app/api/mpesa/callback
+
+STRIPE_SECRET_KEY=sk_test_REPLACE_ME
+STRIPE_WEBHOOK_SECRET=whsec_REPLACE_ME
 ```

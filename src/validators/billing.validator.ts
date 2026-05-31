@@ -13,22 +13,70 @@ export const stripeCheckoutSchema = z.object({
   cancelUrl: z.string().trim().url().optional()
 })
 
-export const mpesaCallbackSchema = z.object({
+const normalizedMpesaCallbackSchema = z.object({
   eventId: z.string().trim().optional(),
   checkoutRequestId: z.string().trim().min(1),
+  merchantRequestId: z.string().trim().optional(),
   resultCode: z.number(),
-  transactionId: z.string().trim().optional()
+  resultDesc: z.string().trim().optional(),
+  transactionId: z.string().trim().optional(),
+  amount: z.number().optional(),
+  phoneNumber: z.string().trim().optional(),
+  transactionDate: z.string().trim().optional(),
+  rawPayload: z.unknown().optional()
 })
 
-export const stripeWebhookSchema = z.object({
-  id: z.string().trim().min(1),
-  type: z.string().trim().min(1),
-  data: z.object({
-    object: z.object({
-      id: z.string().trim().min(1),
-      payment_intent: z.string().trim().optional()
-    })
-  })
-})
+export const mpesaCallbackSchema = z.preprocess((value) => {
+  const payload = value as {
+    Body?: {
+      stkCallback?: {
+        MerchantRequestID?: string
+        CheckoutRequestID?: string
+        ResultCode?: number
+        ResultDesc?: string
+        CallbackMetadata?: { Item?: Array<{ Name?: string; Value?: string | number }> }
+      }
+    }
+  }
+
+  const callback = payload?.Body?.stkCallback
+  if (!callback) return value
+
+  const metadata = extractMpesaMetadata(callback.CallbackMetadata?.Item)
+  return {
+    eventId: `mpesa-${callback.CheckoutRequestID}`,
+    merchantRequestId: callback.MerchantRequestID,
+    checkoutRequestId: callback.CheckoutRequestID,
+    resultCode: callback.ResultCode,
+    resultDesc: callback.ResultDesc,
+    transactionId: metadata.transactionId,
+    amount: metadata.amount,
+    phoneNumber: metadata.phoneNumber,
+    transactionDate: metadata.transactionDate,
+    rawPayload: value
+  }
+}, normalizedMpesaCallbackSchema)
 
 export type PlanType = z.infer<typeof planTypeSchema>
+export type MpesaCallbackInput = z.infer<typeof normalizedMpesaCallbackSchema>
+
+function extractMpesaMetadata(items?: Array<{ Name?: string; Value?: string | number }>) {
+  const metadata: { transactionId?: string; amount?: number; transactionDate?: string; phoneNumber?: string } = {}
+  for (const item of items ?? []) {
+    switch (item.Name) {
+      case 'Amount':
+        metadata.amount = Number(item.Value)
+        break
+      case 'MpesaReceiptNumber':
+        metadata.transactionId = String(item.Value)
+        break
+      case 'TransactionDate':
+        metadata.transactionDate = String(item.Value)
+        break
+      case 'PhoneNumber':
+        metadata.phoneNumber = String(item.Value)
+        break
+    }
+  }
+  return metadata
+}

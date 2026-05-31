@@ -13,6 +13,7 @@ import { reportRouter } from './routes/report.routes.js'
 import { settingsRouter } from './routes/settings.routes.js'
 import { billingRouter } from './routes/billing.routes.js'
 import { webhookRouter } from './routes/webhook.routes.js'
+import { mpesaCallback, stripeWebhook } from './controllers/webhook.controller.js'
 import { adminRouter } from './routes/admin.routes.js'
 import { assetRouter } from './routes/asset.routes.js'
 import { createPublicPlatformRouter, notificationRouter, platformAdminRouter } from './routes/platform.routes.js'
@@ -31,6 +32,8 @@ export function createApp(options: CreateAppOptions = {}) {
 
   app.use(helmet())
   app.use(cors())
+  app.post('/api/v1/webhooks/stripe', express.raw({ type: 'application/json', limit: '1mb' }), stripeWebhook)
+  app.post('/api/stripe/webhook', express.raw({ type: 'application/json', limit: '1mb' }), stripeWebhook)
   app.use(express.json({ limit: '1mb' }))
   if (process.env.NODE_ENV !== 'test') {
     app.use(morgan('dev'))
@@ -41,6 +44,7 @@ export function createApp(options: CreateAppOptions = {}) {
   })
 
   app.use('/api/v1/webhooks', webhookRouter)
+  app.post('/api/mpesa/callback', mpesaCallback)
   app.use('/api/v1', createPublicPlatformRouter(verifier))
   app.use('/api/v1', publicAuthRouter)
   app.use('/api/v1', authMiddleware(verifier))
