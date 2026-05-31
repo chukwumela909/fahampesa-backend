@@ -39,7 +39,6 @@ const defaultIntegrationSettings = {
 
 export async function listEnhancedAuthUsers(context: RequestContext, input: { email?: string; includeFirestore?: boolean }) {
   requirePlatformAdmin(context)
-  const localUsers = await localAuthUsers(input.email)
   let firebaseUsers: Record<string, unknown>[] = []
   let source = 'Mongo users'
   let warning: string | undefined
@@ -51,10 +50,15 @@ export async function listEnhancedAuthUsers(context: RequestContext, input: { em
     warning = error instanceof Error ? error.message : 'Firebase Auth user listing unavailable'
   }
 
+  const localUsers = await localAuthUsers({
+    email: input.email,
+    firebaseUids: input.email ? firebaseUsers.map((user) => String(user.uid)).filter(Boolean) : undefined
+  })
   const usersByUid = new Map<string, Record<string, unknown>>()
   for (const user of localUsers) usersByUid.set(String(user.uid), user)
   for (const user of firebaseUsers) {
     const uid = String(user.uid)
+    if (!usersByUid.has(uid)) continue
     usersByUid.set(uid, { ...(usersByUid.get(uid) ?? {}), ...user })
   }
 
@@ -136,7 +140,7 @@ export async function createSuperAdminUser(context: RequestContext | undefined, 
 
 export async function getUserStatistics(context: RequestContext) {
   requirePlatformAdmin(context)
-  const users = await localAuthUsers()
+  const users = await localAuthUsers({})
   const now = Date.now()
   const dayAgo = now - 24 * 60 * 60 * 1000
   const weekAgo = now - 7 * 24 * 60 * 60 * 1000
@@ -270,7 +274,7 @@ export async function listAnnouncements(context: RequestContext, announcementId?
 
 export async function listNotificationRecipients(context: RequestContext, audience?: string) {
   requirePlatformAdmin(context)
-  const users = await localAuthUsers()
+  const users = await localAuthUsers({})
   return {
     success: true,
     recipients: users.filter((user) => matchesAudience(user, audience ?? 'all')),
@@ -278,18 +282,30 @@ export async function listNotificationRecipients(context: RequestContext, audien
   }
 }
 
-async function localAuthUsers(email?: string) {
+async function localAuthUsers(input: { email?: string; firebaseUids?: string[] }) {
   const query: Record<string, unknown> = {}
-  if (email) query.email = new RegExp(escapeRegex(email), 'i')
+  const filters: Record<string, unknown>[] = []
+  if (input.email) filters.push({ email: new RegExp(escapeRegex(input.email), 'i') })
+  if (input.firebaseUids?.length) filters.push({ firebaseUid: { $in: input.firebaseUids } })
+  if (filters.length === 1) Object.assign(query, filters[0])
+  if (filters.length > 1) query.$or = filters
   const users = await UserModel.find(query).sort({ createdAt: -1 })
   const memberships = await BusinessMembershipModel.find({ userId: { $in: users.map((user) => user._id) } })
   const accounts = await BusinessAccountModel.find({ _id: { $in: memberships.map((membership) => membership.businessAccountId) } })
   const subscriptions = await SubscriptionModel.find({ businessAccountId: { $in: accounts.map((account) => account._id) } }).sort({ createdAt: -1 })
-  return users.map((user) => {
-    const membership = memberships.find((item) => item.userId.toString() === user._id.toString())
-    const account = membership ? accounts.find((item) => item._id.toString() === membership.businessAccountId.toString()) : undefined
+  const accountById = new Map(accounts.map((account) => [account._id.toString(), account]))
+  const membershipByUserId = new Map(
+    memberships
+      .filter((membership) => accountById.has(membership.businessAccountId.toString()))
+      .map((membership) => [membership.userId.toString(), membership])
+  )
+
+  return users.flatMap((user) => {
+    const membership = membershipByUserId.get(user._id.toString())
+    const account = membership ? accountById.get(membership.businessAccountId.toString()) : undefined
+    if (!account) return []
     const subscription = account ? subscriptions.find((item) => item.businessAccountId.toString() === account._id.toString()) : undefined
-    return {
+    return [{
       uid: user.firebaseUid,
       id: user._id.toString(),
       email: user.email,
@@ -309,7 +325,7 @@ async function localAuthUsers(email?: string) {
       subscriptionId: subscription?._id.toString() ?? null,
       subscriptionEndDate: account?.subscriptionEndsAt?.getTime() ?? null,
       planType: account?.planType ?? null
-    }
+    }]
   })
 }
 
@@ -340,7 +356,7 @@ function userStats(users: Record<string, unknown>[]) {
 }
 
 async function countRecipients(audience: string) {
-  const users = await localAuthUsers()
+  const users = await localAuthUsers({})
   return users.filter((user) => matchesAudience(user, audience)).length
 }
 

@@ -692,9 +692,9 @@ These routes require platform admin authorization from Firebase custom claims.
 | `POST` | `/admin/payment-events/:eventId/retry` | Retry failed payment event. |
 | `GET` | `/admin/audit-logs` | Audit logs. |
 | `GET` | `/admin/payments` | Payment events. |
-| `GET` | `/admin/auth-users` | List local/auth users with stats. |
-| `GET` | `/admin/firebase-auth-users?email=<email>&includeFirestore=true` | List Firebase Auth users when Firebase Admin is configured; falls back to Mongo users. |
-| `GET` | `/admin/user-stats` | User totals and activity breakdown. |
+| `GET` | `/admin/auth-users` | List account-backed local/auth users with stats. |
+| `GET` | `/admin/firebase-auth-users?email=<email>&includeFirestore=true` | List account-backed users enriched with Firebase Auth data when Firebase Admin is configured; falls back to Mongo users. |
+| `GET` | `/admin/user-stats` | Account-backed user totals and activity breakdown. |
 | `POST` | `/admin/users/:userId/disable` | Disable or re-enable a user and suspend/reactivate memberships. |
 | `GET` | `/admin/settings/platform` | Get platform settings. |
 | `POST` | `/admin/settings/platform` | Update platform settings. |
