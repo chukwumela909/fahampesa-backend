@@ -9,6 +9,7 @@ This file follows a lightweight chronological format during active development.
 ### Added
 
 - Wired live subscription billing providers for M-Pesa Daraja STK push and Stripe Checkout/Webhooks.
+- Added an owner billing endpoint to activate the current business on a manual monthly subscription.
 - Added signed Stripe raw-body webhook handling, real M-Pesa callback parsing, callback compatibility aliases, and checkout status polling.
 - Added production payment environment validation and placeholder deployment docs.
 

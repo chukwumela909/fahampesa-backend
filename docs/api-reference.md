@@ -625,8 +625,17 @@ Mounted under `/billing`.
 | `GET` | `/billing/history` | Billing/payment history. |
 | `GET` | `/billing/receipts/:subscriptionId` | Subscription receipt. |
 | `GET` | `/billing/checkout-status/:subscriptionId` | Poll checkout/subscription status. |
+| `POST` | `/billing/subscription/activate` | Activate the current owner's business on a monthly plan. |
 | `POST` | `/billing/mpesa/stk-push` | Start M-Pesa checkout. |
 | `POST` | `/billing/stripe/checkout-session` | Start Stripe checkout. |
+
+### `POST /billing/subscription/activate`
+
+Creates a zero-amount manual monthly subscription for the current owner's business and marks the business subscription active.
+
+```json
+{}
+```
 
 ### `POST /billing/mpesa/stk-push`
 

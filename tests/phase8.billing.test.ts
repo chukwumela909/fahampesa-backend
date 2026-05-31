@@ -222,6 +222,42 @@ describe('Phase 8 production subscription billing', () => {
     expect(subscription.transactionId).toBe(`MPESA-${checkout.body.data.subscription.checkoutRequestId}`)
   })
 
+  it('activates the current owner on a monthly plan and unlocks paid access', async () => {
+    await onboardOwner('owner', 'Kenya')
+
+    const blockedBranch = await request(app)
+      .post('/api/v1/branches')
+      .set('Authorization', 'Bearer owner')
+      .send({ name: 'Blocked Branch', branchCode: 'BLK', location: { address: 'Before subscription' } })
+    expect(blockedBranch.status).toBe(403)
+    expect(blockedBranch.body.error.code).toBe('branch_limit_reached')
+
+    const activated = await request(app)
+      .post('/api/v1/billing/subscription/activate')
+      .set('Authorization', 'Bearer owner')
+      .send({})
+    expect(activated.status).toBe(201)
+    expect(activated.body.data.account.planTier).toBe('paid')
+    expect(activated.body.data.account.planType).toBe('monthly')
+    expect(activated.body.data.account.subscriptionStatus).toBe('active')
+    expect(activated.body.data.account.subscriptionEndsAt).toBeTruthy()
+    expect(activated.body.data.subscription.provider).toBe('manual')
+    expect(activated.body.data.subscription.planType).toBe('monthly')
+    expect(activated.body.data.subscription.amount).toBe(0)
+
+    const me = await request(app).get('/api/v1/me').set('Authorization', 'Bearer owner')
+    expect(me.status).toBe(200)
+    expect(me.body.data.planTier).toBe('paid')
+    expect(me.body.data.subscriptionStatus).toBe('active')
+    expect(me.body.data.subscriptionEndsAt).toBeTruthy()
+
+    const paidBranch = await request(app)
+      .post('/api/v1/branches')
+      .set('Authorization', 'Bearer owner')
+      .send({ name: 'Paid Branch', branchCode: 'PAID', location: { address: 'After subscription' } })
+    expect(paidBranch.status).toBe(201)
+  })
+
   it('creates Stripe checkout, verifies signed webhooks, expires sessions, and ignores unrelated events', async () => {
     await onboardOwner('ownerOther', 'Uganda')
 
