@@ -89,11 +89,12 @@ export async function createBranch(context: RequestContext, input: BranchInput, 
       throw new ApiError(403, 'branch_limit_reached', `Branch limit reached for current plan (${limit})`)
     }
 
+    const branchInput = omitUndefined(input)
     const [branch] = await BranchModel.create(
       [
         {
           businessAccountId: context.businessAccountId,
-          ...input,
+          ...branchInput,
           contact: input.contact || {},
           openingHours: input.openingHours || [],
           createdBy: context.userId
@@ -261,4 +262,8 @@ function requireBusinessContext(context: RequestContext) {
 function sanitizeBranchUpdate(input: Partial<BranchInput & { status: string }>) {
   const forbidden = new Set(['businessAccountId', 'createdBy', 'disabledAt', 'disabledBy'])
   return Object.fromEntries(Object.entries(input).filter(([key, value]) => !forbidden.has(key) && value !== undefined))
+}
+
+function omitUndefined<T extends object>(input: T) {
+  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined)) as Partial<T>
 }

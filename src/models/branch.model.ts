@@ -66,7 +66,10 @@ const branchSchema = new Schema(
 )
 
 branchSchema.index({ businessAccountId: 1, status: 1 })
-branchSchema.index({ businessAccountId: 1, branchCode: 1 }, { unique: true, sparse: true })
+branchSchema.index(
+  { businessAccountId: 1, branchCode: 1 },
+  { unique: true, partialFilterExpression: { branchCode: { $type: 'string', $gt: '' } } }
+)
 
 export type BranchDocument = InferSchemaType<typeof branchSchema>
 export const BranchModel = model('Branch', branchSchema)

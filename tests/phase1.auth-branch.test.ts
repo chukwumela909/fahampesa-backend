@@ -242,6 +242,23 @@ describe('Phase 1 auth, onboarding, subscription access, and branches', () => {
     expect(override.status).toBe(201)
   })
 
+  it('treats blank branch codes as omitted during branch creation', async () => {
+    await onboardOwner()
+    await BusinessAccountModel.updateOne({}, { $set: { planTier: 'paid', subscriptionStatus: 'active', subscriptionEndsAt: futureDate() } })
+
+    const firstBlankCode = await createBranch('Second Branch', '')
+    expect(firstBlankCode.status).toBe(201)
+    expect(firstBlankCode.body.data.branchCode).toBeUndefined()
+
+    const secondBlankCode = await createBranch('Third Branch', '   ')
+    expect(secondBlankCode.status).toBe(201)
+    expect(secondBlankCode.body.data.branchCode).toBeUndefined()
+
+    const branches = await BranchModel.find({ name: { $in: ['Second Branch', 'Third Branch'] } }).sort({ createdAt: 1 })
+    expect(branches).toHaveLength(2)
+    expect(branches.every((branch) => branch.branchCode === undefined)).toBe(true)
+  })
+
   it('allows reads but blocks writes when paid subscription is expired', async () => {
     await onboardOwner()
     await BusinessAccountModel.updateOne({}, { $set: { planTier: 'paid', subscriptionStatus: 'active', subscriptionEndsAt: pastDate() } })

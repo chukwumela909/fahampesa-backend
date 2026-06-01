@@ -28,12 +28,17 @@ const branchContactSchema = z.object({
   whatsapp: z.string().trim().optional()
 })
 
+const optionalTrimmedString = z.preprocess(
+  (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+  z.string().trim().optional()
+)
+
 export const createBranchSchema = z.object({
   name: z.string().trim().min(1),
   location: branchLocationSchema,
   contact: branchContactSchema.optional(),
   openingHours: z.array(openingHoursSchema).optional(),
-  branchCode: z.string().trim().optional(),
+  branchCode: optionalTrimmedString,
   branchType: z.enum(['MAIN', 'BRANCH', 'OUTLET', 'WAREHOUSE', 'KIOSK']).optional(),
   description: z.string().trim().optional(),
   currency: z.string().trim().optional(),
