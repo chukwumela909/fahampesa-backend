@@ -92,6 +92,44 @@ describe('Phase 4 sales, expenses, and debtors', () => {
     expect(movements.body.data[0].newQuantity).toBe(7)
   })
 
+  it('applies fixed and percentage discounts to line items and the whole cart', async () => {
+    const onboarded = await onboardOwner()
+    const branchId = onboarded.body.data.branch.id
+    const milk = await createProduct(branchId, 'Milk 500ml', 'MILK-500', 10, 50)
+    const bread = await createProduct(branchId, 'Bread', 'BREAD', 10, 30)
+
+    const sale = await request(app)
+      .post(`/api/v1/branches/${branchId}/sales`)
+      .set('Authorization', 'Bearer owner')
+      .send({
+        items: [
+          { productId: milk.body.data.id, quantity: 2, unitPrice: 100, discount: 10, discountType: 'percentage' },
+          { productId: bread.body.data.id, quantity: 1, unitPrice: 80, discount: 5, discountType: 'fixed' }
+        ],
+        paymentMethod: 'cash',
+        tax: 5,
+        discount: 10,
+        discountType: 'percentage'
+      })
+
+    expect(sale.status).toBe(201)
+    expect(sale.body.data.items[0].discount).toBe(10)
+    expect(sale.body.data.items[0].discountType).toBe('percentage')
+    expect(sale.body.data.items[0].discountAmount).toBe(20)
+    expect(sale.body.data.items[0].lineSubtotal).toBe(180)
+    expect(sale.body.data.items[1].discount).toBe(5)
+    expect(sale.body.data.items[1].discountType).toBe('fixed')
+    expect(sale.body.data.items[1].discountAmount).toBe(5)
+    expect(sale.body.data.items[1].lineSubtotal).toBe(75)
+    expect(sale.body.data.subtotal).toBe(255)
+    expect(sale.body.data.discount).toBe(10)
+    expect(sale.body.data.discountType).toBe('percentage')
+    expect(sale.body.data.discountAmount).toBe(26)
+    expect(sale.body.data.totalAmount).toBe(234)
+    expect(sale.body.data.totalCost).toBe(130)
+    expect(sale.body.data.profit).toBe(104)
+  })
+
   it('rejects overselling and lets cashier create assigned-branch sales without seeing cost fields', async () => {
     const onboarded = await onboardOwner()
     const branchId = onboarded.body.data.branch.id

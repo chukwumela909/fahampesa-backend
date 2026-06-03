@@ -372,7 +372,8 @@ Mounted under `/branches/:branchId/sales`.
       "productId": "mongo-product-id",
       "quantity": 2,
       "unitPrice": 120,
-      "discount": 0
+      "discount": 10,
+      "discountType": "percentage"
     }
   ],
   "customer": {
@@ -383,13 +384,23 @@ Mounted under `/branches/:branchId/sales`.
   },
   "paymentMethod": "cash",
   "tax": 0,
-  "discount": 0,
+  "discount": 5,
+  "discountType": "fixed",
   "notes": "Counter sale"
 }
 ```
 
 `paymentMethod` is `cash`, `mpesa`, `bank_transfer`, `card`, `credit`, `cheque`, or `other`.
 For `credit`, `customer.debtorId` is required.
+
+Discounts can be applied per item and to the whole cart:
+
+- `discountType: "fixed"` treats `discount` as a currency amount.
+- `discountType: "percentage"` treats `discount` as a percentage from `0` to `100`.
+- If `discountType` is omitted, it defaults to `"fixed"` for backward compatibility.
+- Item percentage discounts are calculated from `quantity * unitPrice`.
+- Cart percentage discounts are calculated from `subtotal + tax`, after item-level discounts.
+- Responses include `discountAmount`, the computed currency amount applied.
 
 ## Expenses
 

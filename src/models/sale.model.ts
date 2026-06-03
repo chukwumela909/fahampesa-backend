@@ -7,6 +7,8 @@ const saleItemSchema = new Schema(
     quantity: { type: Number, required: true, min: 0 },
     unitPrice: { type: Number, required: true, min: 0 },
     discount: { type: Number, default: 0, min: 0 },
+    discountType: { type: String, enum: ['fixed', 'percentage'], default: 'fixed' },
+    discountAmount: { type: Number, default: 0, min: 0 },
     lineSubtotal: { type: Number, required: true, min: 0 },
     lineCost: { type: Number, required: true, min: 0 },
     lineProfit: { type: Number, required: true }
@@ -34,6 +36,8 @@ const saleSchema = new Schema(
     subtotal: { type: Number, required: true, min: 0 },
     tax: { type: Number, default: 0, min: 0 },
     discount: { type: Number, default: 0, min: 0 },
+    discountType: { type: String, enum: ['fixed', 'percentage'], default: 'fixed' },
+    discountAmount: { type: Number, default: 0, min: 0 },
     totalAmount: { type: Number, required: true, min: 0 },
     totalCost: { type: Number, required: true, min: 0 },
     profit: { type: Number, required: true },

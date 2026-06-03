@@ -12,11 +12,14 @@ import { addDebtorPurchase } from './debtor.service.js'
 import { updateLowStockAlert } from './inventory.service.js'
 import { writeAuditLog } from './audit.service.js'
 
+type DiscountType = 'fixed' | 'percentage'
+
 export interface SaleItemInput {
   productId: Types.ObjectId
   quantity: number
   unitPrice: number
   discount?: number
+  discountType?: DiscountType
 }
 
 export interface CreateSaleInput {
@@ -30,6 +33,7 @@ export interface CreateSaleInput {
   paymentMethod: 'cash' | 'mpesa' | 'bank_transfer' | 'card' | 'credit' | 'cheque' | 'other'
   tax?: number
   discount?: number
+  discountType?: DiscountType
   notes?: string
 }
 
@@ -82,7 +86,14 @@ export async function createSale(
         throw new ApiError(409, 'insufficient_stock', `Insufficient stock for ${product.name}`)
       }
 
-      const lineSubtotal = item.quantity * item.unitPrice - (item.discount ?? 0)
+      const lineGross = item.quantity * item.unitPrice
+      const itemDiscountType = item.discountType ?? 'fixed'
+      const itemDiscountAmount = calculateDiscountAmount(lineGross, item.discount ?? 0, itemDiscountType)
+      if (itemDiscountAmount > lineGross) {
+        throw new ApiError(422, 'invalid_item_discount', `Discount cannot exceed line total for ${product.name}`)
+      }
+
+      const lineSubtotal = lineGross - itemDiscountAmount
       const lineCost = item.quantity * inventory.costPrice
       subtotal += lineSubtotal
       totalCost += lineCost
@@ -92,6 +103,8 @@ export async function createSale(
         quantity: item.quantity,
         unitPrice: item.unitPrice,
         discount: item.discount ?? 0,
+        discountType: itemDiscountType,
+        discountAmount: itemDiscountAmount,
         lineSubtotal,
         lineCost,
         lineProfit: lineSubtotal - lineCost
@@ -99,8 +112,11 @@ export async function createSale(
     }
 
     const discount = input.discount ?? 0
+    const discountType = input.discountType ?? 'fixed'
     const tax = input.tax ?? 0
-    const totalAmount = subtotal + tax - discount
+    const cartDiscountBase = subtotal + tax
+    const discountAmount = calculateDiscountAmount(cartDiscountBase, discount, discountType)
+    const totalAmount = cartDiscountBase - discountAmount
     if (totalAmount < 0) throw new ApiError(422, 'invalid_sale_total', 'Sale total cannot be negative')
 
     const [sale] = await SaleModel.create(
@@ -115,6 +131,8 @@ export async function createSale(
           subtotal,
           tax,
           discount,
+          discountType,
+          discountAmount,
           totalAmount,
           totalCost,
           profit: totalAmount - totalCost,
@@ -258,6 +276,11 @@ function requireManagerRole(context: RequestContext) {
   if (context.role !== 'owner' && context.role !== 'manager') {
     throw new ApiError(403, 'manager_required', 'Only owners and managers can update or delete sales')
   }
+}
+
+function calculateDiscountAmount(baseAmount: number, discount: number, discountType: DiscountType) {
+  if (discountType === 'percentage') return (baseAmount * discount) / 100
+  return discount
 }
 
 function getInventoryStatus(quantity: number, reorderLevel: number) {
