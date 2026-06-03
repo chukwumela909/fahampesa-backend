@@ -125,7 +125,9 @@ Required:
   "staffInvitations": [
     {
       "email": "manager@example.com",
-      "role": "manager"
+      "role": "manager",
+      "branchIds": ["mongo-branch-id"],
+      "permissions": ["inventory:read"]
     }
   ]
 }
@@ -189,6 +191,10 @@ All staff routes require an authenticated user with business context. Staff mana
 | --- | --- | --- |
 | `GET` | `/staff?branchId=<id>&status=<status>` | List business staff memberships. |
 | `POST` | `/staff` | Create a staff user/membership. |
+| `GET` | `/staff/invitations?status=<status>` | List staff invitations. |
+| `POST` | `/staff/invitations` | Create or replace a pending staff invitation and return an invite link. |
+| `POST` | `/staff/invitations/:invitationId/cancel` | Cancel a pending staff invitation. |
+| `POST` | `/staff/invitations/accept` | Accept an invitation after Firebase sign-in. |
 | `GET` | `/staff/:staffId` | Get staff member. |
 | `PUT` | `/staff/:staffId` | Update staff member. |
 | `PATCH` | `/staff/:staffId` | Partially update staff member. |
@@ -223,6 +229,71 @@ All staff routes require an authenticated user with business context. Staff mana
 ```
 
 `role` is `manager` or `cashier` for staff creation.
+
+### `POST /staff/invitations`
+
+Creates a pending invitation. The backend stores only a token hash and returns the raw token inside `inviteUrl`.
+If another pending invite exists for the same business/email, it is cancelled and replaced.
+
+```json
+{
+  "email": "cashier@example.com",
+  "role": "cashier",
+  "branchIds": ["mongo-branch-id"],
+  "permissions": ["sales:read"]
+}
+```
+
+Response:
+
+```json
+{
+  "data": {
+    "id": "mongo-invitation-id",
+    "email": "cashier@example.com",
+    "sourceRole": "cashier",
+    "role": "cashier",
+    "status": "pending",
+    "expiresAt": "2026-06-10T10:00:00.000Z",
+    "assignedBranchIds": ["mongo-branch-id"],
+    "permissions": ["sales:read"],
+    "inviteUrl": "https://app.example.com/staff/invite?token=raw-token"
+  }
+}
+```
+
+Invite links use `NEXT_PUBLIC_BASE_URL` when configured, otherwise `APP_BASE_URL`, and expire after 7 days.
+
+### `POST /staff/invitations/accept`
+
+Requires a Firebase bearer token. The signed-in Firebase email must match the invited email.
+
+```json
+{
+  "token": "raw-token-from-invite-url"
+}
+```
+
+Response:
+
+```json
+{
+  "data": {
+    "businessAccountId": "mongo-business-id",
+    "role": "cashier",
+    "assignedBranchIds": ["mongo-branch-id"],
+    "membership": {
+      "id": "mongo-membership-id",
+      "role": "cashier",
+      "assignedBranchIds": ["mongo-branch-id"]
+    }
+  }
+}
+```
+
+After accepting, refresh `/me`; the new membership is used for dashboard routing and branch-limited access.
+
+Invitation errors include `invitation_not_found`, `invitation_expired`, `invitation_cancelled`, `invitation_email_mismatch`, `invitation_already_accepted`, and `staff_already_exists`.
 
 ### `PATCH /staff/:staffId`
 

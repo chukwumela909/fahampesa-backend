@@ -198,7 +198,9 @@ Example payload:
   "staffInvitations": [
     {
       "email": "manager@example.com",
-      "role": "manager"
+      "role": "manager",
+      "branchIds": ["branch-id"],
+      "permissions": ["inventory:read"]
     },
     {
       "email": "cashier@example.com",
@@ -250,7 +252,55 @@ Response:
 }
 ```
 
+When `staffInvitations` are supplied, each returned invitation includes an `inviteUrl`:
+
+```json
+{
+  "id": "invitation-id",
+  "email": "cashier@example.com",
+  "role": "cashier",
+  "status": "pending",
+  "expiresAt": "2026-06-10T10:00:00.000Z",
+  "assignedBranchIds": ["branch-id"],
+  "permissions": [],
+  "inviteUrl": "https://app.example.com/staff/invite?token=raw-token"
+}
+```
+
+If onboarding omits `branchIds`, the invitation is assigned to the first/main branch created by onboarding.
+
 After success, refresh `/me` and route to the dashboard.
+
+## Staff Invite Link Flow
+
+Owners and managers can create staff invitations after onboarding:
+
+```http
+POST /staff/invitations
+```
+
+```json
+{
+  "email": "cashier@example.com",
+  "role": "cashier",
+  "branchIds": ["branch-id"],
+  "permissions": ["sales:read"]
+}
+```
+
+Open the returned `inviteUrl` on the frontend. The frontend should:
+
+1. Read `token` from `/staff/invite?token=...`.
+2. Sign in or sign up the staff member with Firebase.
+3. Call `POST /staff/invitations/accept` with the Firebase ID token.
+
+```json
+{
+  "token": "raw-token-from-url"
+}
+```
+
+The Firebase account email must match the invited email. On success, call `/me`; it will include the new `businessAccountId`, role, membership, and branch access for dashboard routing.
 
 ## Important Error Codes
 
@@ -264,5 +314,5 @@ After success, refresh `/me` and route to the dashboard.
 
 - Do not send `userId`, `businessAccountId`, or owner IDs from the frontend for onboarding. The backend derives identity from the Firebase token.
 - Phone OTP sending and verification should remain in Firebase Web SDK unless a separate backend phone-auth flow is built later.
-- `staffInvitations` currently records invitation intent. A full staff acceptance/invite-email flow is a separate backend feature.
+- `staffInvitations` now creates 7-day invite links. Email sending is not included yet; display or send the returned `inviteUrl` from the frontend/admin workflow.
 - The backend maps Kenya accounts to M-Pesa billing region from `business.country === "Kenya"`; all other countries map to Stripe/other billing region.

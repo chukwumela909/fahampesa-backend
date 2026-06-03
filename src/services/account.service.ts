@@ -1,14 +1,14 @@
-import type { ClientSession, Types } from 'mongoose'
+import { Types, type ClientSession } from 'mongoose'
 import { BusinessAccountModel } from '../models/business-account.model.js'
 import { BusinessMembershipModel } from '../models/business-membership.model.js'
 import { SettingsModel } from '../models/settings.model.js'
 import { BranchModel } from '../models/branch.model.js'
-import { StaffInvitationModel } from '../models/staff-invitation.model.js'
 import { UserModel } from '../models/user.model.js'
 import { ApiError } from '../utils/api-error.js'
 import { withTransaction } from '../config/database.js'
 import { writeAuditLog } from './audit.service.js'
 import { markOnboardingCompleted } from './onboarding.service.js'
+import { createStaffInvitation } from './staff-invitation.service.js'
 
 export function billingRegionFromCountry(country: string) {
   return country.trim().toLowerCase() === 'kenya' ? 'KENYA' : 'OTHER'
@@ -89,6 +89,8 @@ export interface OnboardBusinessInput {
   staffInvitations?: {
     email: string
     role: 'admin' | 'manager' | 'staff' | 'cashier'
+    branchIds?: string[]
+    permissions?: string[]
   }[]
   requestMeta?: {
     ipAddress?: string
@@ -160,18 +162,22 @@ async function createBusinessWithOwnerAndBranch(input: OnboardBusinessInput, ses
     session ? { session } : {}
   )
 
-  const invitations = input.staffInvitations?.length
-    ? await StaffInvitationModel.insertMany(
-        input.staffInvitations.map((invitation) => ({
+  const invitations = []
+  if (input.staffInvitations?.length) {
+    for (const invitation of input.staffInvitations) {
+      invitations.push(
+        await createStaffInvitation({
           businessAccountId: account._id,
           email: invitation.email,
-          sourceRole: invitation.role,
-          role: mapInvitationRole(invitation.role),
-          invitedBy: input.userId
-        })),
-        session ? { session } : {}
+          role: invitation.role,
+          assignedBranchIds: invitation.branchIds?.length ? invitation.branchIds.map(objectId) : [branch._id],
+          permissions: invitation.permissions,
+          invitedBy: input.userId,
+          session
+        })
       )
-    : []
+    }
+  }
 
   await SettingsModel.create(
     [
@@ -240,7 +246,7 @@ async function updateOwnerProfile(input: OnboardBusinessInput, session?: ClientS
   await UserModel.updateOne({ _id: input.userId }, { $set: profileUpdate }, session ? { session } : {})
 }
 
-function mapInvitationRole(role: 'admin' | 'manager' | 'staff' | 'cashier') {
-  if (role === 'staff' || role === 'cashier') return 'cashier'
-  return 'manager'
+function objectId(value: string) {
+  if (!Types.ObjectId.isValid(value)) throw new ApiError(400, 'invalid_object_id', 'Invalid object id')
+  return new Types.ObjectId(value)
 }

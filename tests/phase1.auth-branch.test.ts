@@ -194,6 +194,8 @@ describe('Phase 1 auth, onboarding, subscription access, and branches', () => {
     expect(response.body.data.businessAccount.legalCompanyName).toBe('Amina Retail Limited')
     expect(response.body.data.businessAccount.registrationNumber).toBe('C123456789')
     expect(response.body.data.staffInvitations).toHaveLength(2)
+    expect(response.body.data.staffInvitations[0].inviteUrl).toContain('/staff/invite?token=')
+    expect(response.body.data.staffInvitations[0].tokenHash).toBeUndefined()
 
     const user = await UserModel.findOne({ firebaseUid: 'owner_uid' }).orFail()
     expect(user.fullName).toBe('Amina Owner')
@@ -204,8 +206,12 @@ describe('Phase 1 auth, onboarding, subscription access, and branches', () => {
     expect(settings.businessProfile.companyLegalName).toBe('Amina Retail Limited')
     expect(settings.businessProfile.companyRegistrationNumber).toBe('C123456789')
 
-    const invitations = await StaffInvitationModel.find({ businessAccountId: response.body.data.businessAccount.id }).sort({ email: 1 })
+    const invitations = await StaffInvitationModel.find({ businessAccountId: response.body.data.businessAccount.id }).sort({ email: 1 }).select('+tokenHash')
     expect(invitations.map((invitation) => invitation.role)).toEqual(['cashier', 'manager'])
+    expect(invitations.every((invitation) => invitation.tokenHash)).toBe(true)
+    expect(invitations.every((invitation) => invitation.status === 'pending')).toBe(true)
+    expect(invitations.every((invitation) => invitation.expiresAt.getTime() > Date.now())).toBe(true)
+    expect(invitations.every((invitation) => invitation.assignedBranchIds.map(String).includes(response.body.data.branch.id))).toBe(true)
 
     const state = await OnboardingStateModel.findOne({ userId: user._id }).orFail()
     expect(state.status).toBe('completed')

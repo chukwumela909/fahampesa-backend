@@ -1,7 +1,7 @@
 import type { Response } from 'express'
 import type { AppRequest } from '../types/http.js'
 import { asyncHandler } from '../utils/async-handler.js'
-import { normalizeMongo, serializeDocument } from '../utils/serialize.js'
+import { serializeDocument } from '../utils/serialize.js'
 import { phoneExistsQuerySchema } from '../validators/auth.validator.js'
 import { onboardingProgressSchema, onboardingSchema, onboardingSkipSchema } from '../validators/onboarding.validator.js'
 import { onboardBusiness } from '../services/account.service.js'
@@ -46,7 +46,7 @@ export const onboard = asyncHandler(async (req: AppRequest, res: Response) => {
       businessAccount: serializeDocument(result.account),
       branch: serializeDocument(result.branch),
       membership: serializeDocument(result.membership),
-      staffInvitations: result.invitations.map((invitation) => normalizeMongo(invitation.toObject({ versionKey: false })))
+      staffInvitations: result.invitations
     }
   })
 })

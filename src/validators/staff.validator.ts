@@ -2,10 +2,26 @@ import { z } from 'zod'
 
 const roleSchema = z.enum(['owner', 'manager', 'cashier'])
 const statusSchema = z.enum(['active', 'inactive', 'suspended'])
+const invitationStatusSchema = z.enum(['pending', 'accepted', 'cancelled'])
 
 export const staffListQuerySchema = z.object({
   branchId: z.string().optional(),
   status: statusSchema.optional()
+})
+
+export const staffInvitationListQuerySchema = z.object({
+  status: invitationStatusSchema.optional()
+})
+
+export const createStaffInvitationSchema = z.object({
+  email: z.string().trim().email(),
+  role: roleSchema.exclude(['owner']),
+  branchIds: z.array(z.string().trim().min(1)).min(1),
+  permissions: z.array(z.string().trim().min(1)).default([])
+})
+
+export const acceptStaffInvitationSchema = z.object({
+  token: z.string().trim().min(1)
 })
 
 export const createStaffSchema = z.object({
@@ -50,3 +66,4 @@ export const verifyTwoFactorSchema = z.object({
 export type CreateStaffInput = z.infer<typeof createStaffSchema>
 export type UpdateStaffInput = z.infer<typeof updateStaffSchema>
 export type CreateActivityLogInput = z.infer<typeof createActivityLogSchema>
+export type CreateStaffInvitationInput = z.infer<typeof createStaffInvitationSchema>

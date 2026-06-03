@@ -32,7 +32,9 @@ const companyProfileSchema = z.object({
 
 const staffInvitationSchema = z.object({
   email: z.string().trim().email(),
-  role: z.enum(['admin', 'manager', 'staff', 'cashier'])
+  role: z.enum(['admin', 'manager', 'staff', 'cashier']),
+  branchIds: z.array(z.string().trim().min(1)).optional(),
+  permissions: z.array(z.string().trim().min(1)).optional()
 })
 
 export const onboardingSchema = z.object({

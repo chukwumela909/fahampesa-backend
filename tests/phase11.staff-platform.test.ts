@@ -6,6 +6,7 @@ import { MongoMemoryReplSet } from 'mongodb-memory-server'
 import { createApp } from '../src/app.js'
 import type { AuthUser } from '../src/types/http.js'
 import type { FirebaseTokenVerifier } from '../src/config/firebase.js'
+import { StaffInvitationModel } from '../src/models/staff-invitation.model.js'
 
 class FakeVerifier implements FirebaseTokenVerifier {
   constructor(private readonly users: Record<string, AuthUser>) {}
@@ -19,6 +20,12 @@ class FakeVerifier implements FirebaseTokenVerifier {
 
 const fakeUsers: Record<string, AuthUser> = {
   owner: { firebaseUid: 'owner_uid', email: 'owner@example.com', name: 'Owner User' },
+  manager: { firebaseUid: 'manager_uid', email: 'manager@example.com', name: 'Manager User' },
+  cashier: { firebaseUid: 'cashier_uid', email: 'cashier@example.com', name: 'Cashier User' },
+  invitee: { firebaseUid: 'invitee_uid', email: 'invitee@example.com', name: 'Invited User' },
+  wrongInvitee: { firebaseUid: 'wrong_invitee_uid', email: 'wrong@example.com', name: 'Wrong User' },
+  cancelledInvitee: { firebaseUid: 'cancelled_invitee_uid', email: 'cancelled@example.com', name: 'Cancelled User' },
+  expiredInvitee: { firebaseUid: 'expired_invitee_uid', email: 'expired@example.com', name: 'Expired User' },
   admin: { firebaseUid: 'admin_uid', email: 'admin@example.com', name: 'Admin User', platformRole: 'admin' }
 }
 
@@ -83,6 +90,135 @@ describe('Staff, platform admin utilities, and notifications', () => {
     expect(setup.status).toBe(200)
     expect(setup.body.data.secret).toBeTruthy()
     expect(setup.body.data.otpauthUrl).toContain('otpauth://totp/')
+  })
+
+  it('creates, lists, cancels, and accepts staff invitations with constrained dashboard access', async () => {
+    const onboarded = await onboardOwner()
+    const branchId = onboarded.body.data.branch.id
+
+    const created = await request(app)
+      .post('/api/v1/staff/invitations')
+      .set('Authorization', 'Bearer owner')
+      .send({
+        email: 'invitee@example.com',
+        role: 'cashier',
+        branchIds: [branchId],
+        permissions: ['sales:read']
+      })
+
+    expect(created.status).toBe(201)
+    expect(created.body.data.email).toBe('invitee@example.com')
+    expect(created.body.data.role).toBe('cashier')
+    expect(created.body.data.assignedBranchIds).toEqual([branchId])
+    expect(created.body.data.inviteUrl).toContain('/staff/invite?token=')
+    expect(created.body.data.tokenHash).toBeUndefined()
+
+    const stored = await StaffInvitationModel.findById(created.body.data.id).select('+tokenHash').orFail()
+    expect(stored.tokenHash).toBeTruthy()
+    expect(stored.expiresAt.getTime()).toBeGreaterThan(Date.now())
+
+    const listed = await request(app).get('/api/v1/staff/invitations?status=pending').set('Authorization', 'Bearer owner')
+    expect(listed.status).toBe(200)
+    expect(listed.body.data).toHaveLength(1)
+    expect(listed.body.data[0].tokenHash).toBeUndefined()
+
+    const token = tokenFromInviteUrl(created.body.data.inviteUrl)
+    const mismatch = await request(app)
+      .post('/api/v1/staff/invitations/accept')
+      .set('Authorization', 'Bearer wrongInvitee')
+      .send({ token })
+    expect(mismatch.status).toBe(403)
+    expect(mismatch.body.error.code).toBe('invitation_email_mismatch')
+
+    const accepted = await request(app)
+      .post('/api/v1/staff/invitations/accept')
+      .set('Authorization', 'Bearer invitee')
+      .send({ token })
+    expect(accepted.status).toBe(200)
+    expect(accepted.body.data.role).toBe('cashier')
+    expect(accepted.body.data.assignedBranchIds).toEqual([branchId])
+
+    const me = await request(app).get('/api/v1/me').set('Authorization', 'Bearer invitee')
+    expect(me.status).toBe(200)
+    expect(me.body.data.businessAccountId).toBe(onboarded.body.data.businessAccount.id)
+    expect(me.body.data.role).toBe('cashier')
+    expect(me.body.data.assignedBranchIds).toEqual([branchId])
+
+    const reused = await request(app)
+      .post('/api/v1/staff/invitations/accept')
+      .set('Authorization', 'Bearer invitee')
+      .send({ token })
+    expect(reused.status).toBe(409)
+    expect(reused.body.error.code).toBe('invitation_already_accepted')
+
+    const cancelCreated = await request(app)
+      .post('/api/v1/staff/invitations')
+      .set('Authorization', 'Bearer owner')
+      .send({ email: 'cancelled@example.com', role: 'manager', branchIds: [branchId] })
+    expect(cancelCreated.status).toBe(201)
+
+    const cancelled = await request(app)
+      .post(`/api/v1/staff/invitations/${cancelCreated.body.data.id}/cancel`)
+      .set('Authorization', 'Bearer owner')
+    expect(cancelled.status).toBe(200)
+    expect(cancelled.body.data.status).toBe('cancelled')
+
+    const cancelledAccept = await request(app)
+      .post('/api/v1/staff/invitations/accept')
+      .set('Authorization', 'Bearer cancelledInvitee')
+      .send({ token: tokenFromInviteUrl(cancelCreated.body.data.inviteUrl) })
+    expect(cancelledAccept.status).toBe(410)
+    expect(cancelledAccept.body.error.code).toBe('invitation_cancelled')
+
+    const expiredCreated = await request(app)
+      .post('/api/v1/staff/invitations')
+      .set('Authorization', 'Bearer owner')
+      .send({ email: 'expired@example.com', role: 'cashier', branchIds: [branchId] })
+    expect(expiredCreated.status).toBe(201)
+    await StaffInvitationModel.updateOne({ _id: expiredCreated.body.data.id }, { $set: { expiresAt: new Date(Date.now() - 1000) } })
+
+    const expired = await request(app)
+      .post('/api/v1/staff/invitations/accept')
+      .set('Authorization', 'Bearer expiredInvitee')
+      .send({ token: tokenFromInviteUrl(expiredCreated.body.data.inviteUrl) })
+    expect(expired.status).toBe(410)
+    expect(expired.body.error.code).toBe('invitation_expired')
+
+    const invalid = await request(app)
+      .post('/api/v1/staff/invitations/accept')
+      .set('Authorization', 'Bearer invitee')
+      .send({ token: 'invalid-token' })
+    expect(invalid.status).toBe(404)
+    expect(invalid.body.error.code).toBe('invitation_not_found')
+  })
+
+  it('prevents cashiers from managing staff invitations', async () => {
+    const onboarded = await onboardOwner()
+    const branchId = onboarded.body.data.branch.id
+
+    const created = await request(app)
+      .post('/api/v1/staff')
+      .set('Authorization', 'Bearer owner')
+      .send({
+        firebaseUid: 'cashier_uid',
+        email: 'cashier@example.com',
+        fullName: 'Cashier User',
+        role: 'cashier',
+        branchIds: [branchId],
+        permissions: ['sales:read']
+      })
+    expect(created.status).toBe(201)
+
+    const list = await request(app).get('/api/v1/staff/invitations').set('Authorization', 'Bearer cashier')
+    expect(list.status).toBe(403)
+    expect(list.body.error.code).toBe('manager_required')
+
+    const invite = await request(app)
+      .post('/api/v1/staff/invitations')
+      .set('Authorization', 'Bearer cashier')
+      .send({ email: 'invitee@example.com', role: 'cashier', branchIds: [branchId] })
+    expect(invite.status).toBe(403)
+    expect(invite.body.error.code).toBe('manager_required')
   })
 
   it('exposes platform admin user utilities backed by Mongo data', async () => {
@@ -159,4 +295,10 @@ function onboardOwner() {
     business: { businessName: 'Faham Test Shop', businessType: 'retail', country: 'Kenya', currency: 'KES' },
     branch: { name: 'Main Branch', location: { address: '123 Test Street', city: 'Nairobi' }, contact: { phone: '+254700000000' } }
   })
+}
+
+function tokenFromInviteUrl(inviteUrl: string) {
+  const token = new URL(inviteUrl).searchParams.get('token')
+  if (!token) throw new Error('missing invite token')
+  return token
 }

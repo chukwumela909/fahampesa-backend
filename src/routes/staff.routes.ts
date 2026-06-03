@@ -1,10 +1,14 @@
 import { Router } from 'express'
-import { activate, create, createLog, disableTwoFactor, get, list, logs, remove, setupTwoFactor, update, verifyTwoFactor } from '../controllers/staff.controller.js'
+import { acceptInvitation, activate, cancelInvitation, create, createInvitation, createLog, disableTwoFactor, get, list, listInvitations, logs, remove, setupTwoFactor, update, verifyTwoFactor } from '../controllers/staff.controller.js'
 import { requireBusinessContext, requireWriteAccess } from '../middleware/auth.js'
 
 export const staffRouter = Router()
 
+staffRouter.post('/invitations/accept', acceptInvitation)
 staffRouter.use(requireBusinessContext)
+staffRouter.get('/invitations', listInvitations)
+staffRouter.post('/invitations', requireWriteAccess, createInvitation)
+staffRouter.post('/invitations/:staffId/cancel', requireWriteAccess, cancelInvitation)
 staffRouter.get('/', list)
 staffRouter.post('/', requireWriteAccess, create)
 staffRouter.get('/logs', logs)
