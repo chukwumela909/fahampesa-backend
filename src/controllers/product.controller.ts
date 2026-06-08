@@ -2,10 +2,10 @@ import type { Response } from 'express'
 import type { Types } from 'mongoose'
 import type { AppRequest } from '../types/http.js'
 import { asyncHandler } from '../utils/async-handler.js'
-import { ApiError } from '../utils/api-error.js'
 import { objectIdSchema, toObjectId } from '../validators/common.js'
-import { createBranchProductSchema, productListQuerySchema, updateBranchProductSchema } from '../validators/product.validator.js'
+import { bulkUploadProductsSchema, createBranchProductSchema, productListQuerySchema, updateBranchProductSchema } from '../validators/product.validator.js'
 import {
+  bulkCreateBranchProducts,
   createBranchProduct,
   getBranchProduct,
   listBranchProducts,
@@ -59,8 +59,19 @@ export const remove = asyncHandler(async (req: AppRequest, res: Response) => {
   res.json({ data: result })
 })
 
-export const bulkUpload = asyncHandler(async () => {
-  throw new ApiError(501, 'bulk_upload_not_implemented', 'Bulk product upload endpoint is reserved for the import workflow')
+export const bulkUpload = asyncHandler(async (req: AppRequest, res: Response) => {
+  const branchId = toObjectId(objectIdSchema.parse(req.params.branchId))
+  const { products } = bulkUploadProductsSchema.parse(req.body)
+  const result = await bulkCreateBranchProducts(
+    req.context!,
+    branchId,
+    products.map((product) => mapProductBody(product)),
+    {
+      ipAddress: req.ip,
+      userAgent: req.header('user-agent')
+    }
+  )
+  res.status(result.failed === 0 ? 201 : 207).json({ data: result })
 })
 
 export const exportProducts = asyncHandler(async (req: AppRequest, res: Response) => {

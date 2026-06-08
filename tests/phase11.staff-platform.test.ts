@@ -233,6 +233,8 @@ describe('Staff, platform admin utilities, and notifications', () => {
     const stats = await request(app).get('/api/v1/admin/user-stats').set('Authorization', 'Bearer admin')
     expect(stats.status).toBe(200)
     expect(stats.body.stats.total).toBeGreaterThan(0)
+    expect(stats.body.stats.uniqueRegions).toBe(1)
+    expect(stats.body.stats.regions).toEqual([{ region: 'Kenya', count: 1 }])
 
     const disabled = await request(app)
       .post(`/api/v1/admin/users/${userId}/disable`)

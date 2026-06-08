@@ -55,5 +55,10 @@ export const productListQuerySchema = z.object({
   search: z.string().trim().optional()
 })
 
+export const bulkUploadProductsSchema = z.object({
+  products: z.array(createBranchProductSchema).min(1).max(500)
+})
+
 export type CreateBranchProductBody = z.infer<typeof createBranchProductSchema>
 export type UpdateBranchProductBody = z.infer<typeof updateBranchProductSchema>
+export type BulkUploadProductsBody = z.infer<typeof bulkUploadProductsSchema>

@@ -4,6 +4,23 @@ All notable backend planning and implementation changes for FahamPesa will be tr
 
 This file follows a lightweight chronological format during active development.
 
+## 2026-06-08
+
+### Implemented
+
+- Implemented branch product bulk upload, replacing the previous `501 not_implemented` stub.
+  - Accepts `{ products: [...] }` (1–500 rows) at `POST /api/v1/branches/:branchId/products/bulk-upload`.
+  - Processes each row independently with per-row success/failure reporting; one bad row no longer fails the batch.
+  - Returns `201` when all rows succeed and `207` (multi-status) when some rows fail.
+- Implemented real region aggregation in the platform admin user statistics endpoint.
+  - Replaced the hardcoded `uniqueRegions: 0` and `regions: []` placeholders with live counts grouped by business account country.
+  - Surfaced `country` and `billingRegion` on platform auth user records.
+
+### Verified
+
+- `npx tsc -p tsconfig.json --noEmit` passes.
+- `npx vitest run` passes with 62 tests across all phases, including new bulk-upload and region-stats coverage.
+
 ## 2026-05-29
 
 ### Added

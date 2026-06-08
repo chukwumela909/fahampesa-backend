@@ -195,6 +195,53 @@ describe('Phase 3 products and branch inventory', () => {
     expect(second.status).toBe(201)
   })
 
+  it('bulk uploads products and reports per-row success and failure', async () => {
+    const onboarded = await onboardOwner()
+    const branchId = onboarded.body.data.branch.id
+
+    const response = await request(app)
+      .post(`/api/v1/branches/${branchId}/products/bulk-upload`)
+      .set('Authorization', 'Bearer owner')
+      .send({
+        products: [
+          { name: 'Bulk Salt 1kg', sku: 'BULK-SALT', inventory: { initialQuantity: 10, reorderLevel: 2, costPrice: 30, sellingPrice: 50 } },
+          { name: 'Bulk Beans 1kg', sku: 'BULK-BEANS', inventory: { sellingPrice: 120 } },
+          { name: 'Duplicate Salt', sku: 'BULK-SALT', inventory: { sellingPrice: 60 } }
+        ]
+      })
+
+    expect(response.status).toBe(207)
+    expect(response.body.data.total).toBe(3)
+    expect(response.body.data.created).toBe(2)
+    expect(response.body.data.failed).toBe(1)
+    expect(response.body.data.results[2].status).toBe('failed')
+    expect(response.body.data.results[2].error.code).toBe('duplicate_product_identity')
+
+    const products = await request(app).get(`/api/v1/branches/${branchId}/products`).set('Authorization', 'Bearer owner')
+    expect(products.body.data).toHaveLength(2)
+  })
+
+  it('returns 201 when every bulk-upload row succeeds and blocks cashiers', async () => {
+    const onboarded = await onboardOwner()
+    const branchId = onboarded.body.data.branch.id
+
+    const ok = await request(app)
+      .post(`/api/v1/branches/${branchId}/products/bulk-upload`)
+      .set('Authorization', 'Bearer owner')
+      .send({ products: [{ name: 'Bulk Rice', inventory: { sellingPrice: 200 } }] })
+    expect(ok.status).toBe(201)
+    expect(ok.body.data.created).toBe(1)
+    expect(ok.body.data.failed).toBe(0)
+
+    await addMembership('cashier', branchId)
+    const blocked = await request(app)
+      .post(`/api/v1/branches/${branchId}/products/bulk-upload`)
+      .set('Authorization', 'Bearer cashier')
+      .send({ products: [{ name: 'Cashier Bulk', inventory: { sellingPrice: 10 } }] })
+    expect(blocked.status).toBe(403)
+    expect(blocked.body.error.code).toBe('manager_required')
+  })
+
   it('hides cost and valuation fields from cashier reads and blocks cashier product writes', async () => {
     const onboarded = await onboardOwner()
     const branchId = onboarded.body.data.branch.id

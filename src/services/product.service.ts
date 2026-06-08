@@ -124,6 +124,63 @@ export async function createBranchProduct(
   })
 }
 
+export interface BulkProductRowResult {
+  index: number
+  status: 'created' | 'failed'
+  productId?: string
+  name?: string
+  error?: { code: string; message: string }
+}
+
+export interface BulkProductResult {
+  total: number
+  created: number
+  failed: number
+  results: BulkProductRowResult[]
+}
+
+export async function bulkCreateBranchProducts(
+  context: RequestContext,
+  branchId: Types.ObjectId,
+  inputs: ProductIdentityInput[],
+  requestMeta?: { ipAddress?: string; userAgent?: string }
+): Promise<BulkProductResult> {
+  requireManagerRole(context)
+  await getBranchForContext(context, branchId)
+
+  const results: BulkProductRowResult[] = []
+  let created = 0
+  let failed = 0
+
+  for (let index = 0; index < inputs.length; index += 1) {
+    const input = inputs[index]
+    try {
+      const product = (await createBranchProduct(context, branchId, input, requestMeta)) as Record<string, unknown>
+      created += 1
+      results.push({
+        index,
+        status: 'created',
+        productId: typeof product.id === 'string' ? product.id : undefined,
+        name: typeof product.name === 'string' ? product.name : input.name
+      })
+    } catch (error) {
+      failed += 1
+      const apiError = error instanceof ApiError ? error : undefined
+      results.push({
+        index,
+        status: 'failed',
+        name: input.name,
+        error: {
+          code: apiError?.code ?? 'bulk_upload_row_failed',
+          message: error instanceof Error ? error.message : 'Failed to create product'
+        }
+      })
+    }
+  }
+
+  return { total: inputs.length, created, failed, results }
+}
+
 export async function getBranchProduct(context: RequestContext, branchId: Types.ObjectId, productId: Types.ObjectId) {
   await getBranchForContext(context, branchId)
   const product = await ProductModel.findOne({

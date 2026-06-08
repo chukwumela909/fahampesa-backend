@@ -146,6 +146,7 @@ export async function getUserStatistics(context: RequestContext) {
   const weekAgo = now - 7 * 24 * 60 * 60 * 1000
   const monthAgo = now - 30 * 24 * 60 * 60 * 1000
   const activeUsers = users.filter((user) => !user.disabled)
+  const regions = aggregateRegions(users)
   return {
     success: true,
     timestamp: new Date().toISOString(),
@@ -158,8 +159,8 @@ export async function getUserStatistics(context: RequestContext) {
       activeThisMonth: users.filter((user) => dateValue(user.metadata, 'lastSignInTime') >= monthAgo).length,
       newThisWeek: users.filter((user) => dateValue(user.metadata, 'creationTime') >= weekAgo).length,
       newThisMonth: users.filter((user) => dateValue(user.metadata, 'creationTime') >= monthAgo).length,
-      uniqueRegions: 0,
-      regions: [],
+      uniqueRegions: regions.length,
+      regions,
       breakdown: {
         withEmail: users.filter((user) => user.email).length,
         withDisplayName: users.filter((user) => user.displayName).length,
@@ -321,6 +322,8 @@ async function localAuthUsers(input: { email?: string; firebaseUids?: string[] }
       firestoreData: normalizeMongo(user.toObject({ versionKey: false })),
       businessName: account?.businessName,
       businessType: account?.businessType,
+      country: account?.country ?? null,
+      billingRegion: account?.billingRegion ?? null,
       isSubscribed: account?.subscriptionStatus === 'active',
       subscriptionId: subscription?._id.toString() ?? null,
       subscriptionEndDate: account?.subscriptionEndsAt?.getTime() ?? null,
@@ -353,6 +356,18 @@ function userStats(users: Record<string, unknown>[]) {
     monthlySubscribers: users.filter((user) => user.planType === 'monthly').length,
     yearlySubscribers: users.filter((user) => user.planType === 'yearly').length
   }
+}
+
+function aggregateRegions(users: Record<string, unknown>[]) {
+  const counts = new Map<string, number>()
+  for (const user of users) {
+    const country = typeof user.country === 'string' ? user.country.trim() : ''
+    if (!country) continue
+    counts.set(country, (counts.get(country) ?? 0) + 1)
+  }
+  return Array.from(counts.entries())
+    .map(([region, count]) => ({ region, count }))
+    .sort((a, b) => b.count - a.count || a.region.localeCompare(b.region))
 }
 
 async function countRecipients(audience: string) {
