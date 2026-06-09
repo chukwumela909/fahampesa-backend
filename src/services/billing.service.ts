@@ -20,11 +20,15 @@ import type { MpesaCallbackInput, PlanType } from '../validators/billing.validat
 const PLAN_PRICES = {
   monthly: {
     KENYA: { amount: 2000, currency: 'KSH' as const },
-    OTHER: { amount: 10, currency: 'USD' as const }
+    // TEST: reduced to Stripe's USD minimum ($0.50) to verify card payments end-to-end.
+    // Revert to `amount: 10` before production.
+    OTHER: { amount: 0.5, currency: 'USD' as const }
   },
   yearly: {
     KENYA: { amount: 20000, currency: 'KSH' as const },
-    OTHER: { amount: 100, currency: 'USD' as const }
+    // TEST: reduced to Stripe's USD minimum ($0.50) to verify card payments end-to-end.
+    // Revert to `amount: 100` before production.
+    OTHER: { amount: 0.5, currency: 'USD' as const }
   }
 }
 

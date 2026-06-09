@@ -275,9 +275,10 @@ describe('Phase 8 production subscription billing', () => {
     expect(checkout.status).toBe(201)
     expect(checkout.body.data.provider).toBe('stripe')
     expect(checkout.body.data.subscription.currency).toBe('USD')
-    expect(checkout.body.data.subscription.amount).toBe(100)
+    // TEST PRICING: USD plans temporarily set to Stripe's $0.50 minimum (see PLAN_PRICES in billing.service.ts).
+    expect(checkout.body.data.subscription.amount).toBe(0.5)
     expect(checkout.body.data.checkout.url).toBe('https://checkout.stripe.test/cs_test_001')
-    expect(fakeStripeProvider.calls[0].amount).toBe(100)
+    expect(fakeStripeProvider.calls[0].amount).toBe(0.5)
     expect(fakeStripeProvider.calls[0].businessAccountId).toBeTruthy()
     expect(fakeStripeProvider.calls[0].subscriptionId).toBe(checkout.body.data.subscription.id)
 
