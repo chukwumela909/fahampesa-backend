@@ -1,7 +1,8 @@
-import type { ClientSession } from 'mongoose'
+import type { ClientSession, Types } from 'mongoose'
 import type { AuthUser } from '../types/http.js'
 import { UserModel } from '../models/user.model.js'
 import { firebasePhoneExists } from '../config/firebase.js'
+import { notFound } from '../utils/api-error.js'
 
 export async function findOrCreateUser(auth: AuthUser, session?: ClientSession) {
   const existing = await UserModel.findOne({ firebaseUid: auth.firebaseUid }).session(session ?? null)
@@ -15,7 +16,9 @@ export async function findOrCreateUser(auth: AuthUser, session?: ClientSession) 
       existing.phone = auth.phone
       changed = true
     }
-    if (auth.name && existing.fullName !== auth.name) {
+    // Only backfill the name from the auth token when the user has not set one,
+    // so profile edits made via PATCH /me are not clobbered on the next request.
+    if (auth.name && !existing.fullName) {
       existing.fullName = auth.name
       changed = true
     }
@@ -43,6 +46,15 @@ export async function findOrCreateUser(auth: AuthUser, session?: ClientSession) 
     { session }
   )
   return created
+}
+
+export async function updateUserProfile(userId: Types.ObjectId, input: { fullName?: string; phone?: string }) {
+  const user = await UserModel.findById(userId)
+  if (!user) throw notFound('User not found')
+  if (input.fullName !== undefined) user.fullName = input.fullName
+  if (input.phone !== undefined) user.phone = input.phone
+  await user.save()
+  return user
 }
 
 export async function phoneExists(phone: string) {

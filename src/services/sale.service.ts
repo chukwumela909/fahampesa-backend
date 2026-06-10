@@ -8,7 +8,7 @@ import { ApiError, notFound } from '../utils/api-error.js'
 import { normalizeMongo } from '../utils/serialize.js'
 import { withTransaction } from '../config/database.js'
 import { getBranchForContext } from './branch.service.js'
-import { addDebtorPurchase } from './debtor.service.js'
+import { addDebtorPurchase, reverseDebtorPurchase } from './debtor.service.js'
 import { updateLowStockAlert } from './inventory.service.js'
 import { writeAuditLog } from './audit.service.js'
 
@@ -243,13 +243,91 @@ export async function updateSale(
 export async function deleteSale(context: RequestContext, branchId: Types.ObjectId, saleId: Types.ObjectId) {
   requireManagerRole(context)
   await getBranchForContext(context, branchId)
-  const sale = await SaleModel.findOneAndUpdate(
-    { _id: saleId, businessAccountId: context.businessAccountId, branchId, isDeleted: false },
-    { $set: { isDeleted: true, deletedAt: new Date(), deletedBy: context.userId }, $inc: { version: 1 } },
-    { new: true }
-  )
-  if (!sale) throw notFound('Sale not found')
-  return { deleted: true }
+  if (!context.businessAccountId) throw new ApiError(403, 'business_required', 'Business context required')
+  const businessAccountId = context.businessAccountId
+
+  return withTransaction(async (session) => {
+    const activeSession = session.inTransaction() ? session : undefined
+    const sale = await SaleModel.findOne({
+      _id: saleId,
+      businessAccountId,
+      branchId,
+      isDeleted: false
+    }).session(activeSession ?? null)
+    if (!sale) throw notFound('Sale not found')
+
+    sale.isDeleted = true
+    sale.deletedAt = new Date()
+    sale.deletedBy = context.userId
+    sale.version += 1
+    await sale.save(activeSession ? { session: activeSession } : undefined)
+
+    // Restore stock that was deducted at sale time and record a compensating movement
+    for (const item of sale.items) {
+      const inventory = await InventoryItemModel.findOne({
+        businessAccountId,
+        branchId,
+        productId: item.productId
+      }).session(activeSession ?? null)
+      // Inventory item may have been discontinued/removed; skip restoration gracefully
+      if (!inventory) continue
+
+      const previousQuantity = inventory.quantity
+      inventory.quantity += item.quantity
+      inventory.availableQuantity = Math.max(inventory.quantity - inventory.reservedQuantity, 0)
+      inventory.stockValue = inventory.quantity * inventory.costPrice
+      inventory.status = getInventoryStatus(inventory.quantity, inventory.reorderLevel)
+      inventory.lastMovementAt = new Date()
+      inventory.version += 1
+      await inventory.save(activeSession ? { session: activeSession } : undefined)
+
+      await StockMovementModel.create(
+        [
+          {
+            businessAccountId,
+            branchId,
+            productId: item.productId,
+            movementType: 'return',
+            quantity: item.quantity,
+            direction: 'in',
+            previousQuantity,
+            newQuantity: inventory.quantity,
+            unitCostPrice: inventory.costPrice,
+            totalValue: item.quantity * inventory.costPrice,
+            referenceType: 'sale',
+            referenceId: sale._id,
+            reason: `Sale ${sale.saleNumber} deleted`,
+            createdBy: context.userId
+          }
+        ],
+        activeSession ? { session: activeSession } : {}
+      )
+
+      await updateLowStockAlert(businessAccountId, branchId, item.productId, inventory, activeSession)
+    }
+
+    // Reverse the receivable created for credit sales
+    if (sale.paymentMethod === 'credit' && sale.customer?.debtorId) {
+      await reverseDebtorPurchase(context, branchId, sale.customer.debtorId, sale.totalAmount, activeSession)
+    }
+
+    await writeAuditLog(
+      {
+        scope: 'business',
+        businessAccountId,
+        actorUserId: context.userId,
+        actorRole: context.role,
+        action: 'sale.deleted',
+        targetType: 'sale',
+        targetId: sale._id,
+        branchId,
+        metadata: { saleNumber: sale.saleNumber, totalAmount: sale.totalAmount }
+      },
+      activeSession
+    )
+
+    return { deleted: true }
+  })
 }
 
 export function serializeSale(sale: { toObject(options?: unknown): unknown }, context: RequestContext) {

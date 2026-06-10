@@ -2,11 +2,11 @@ import type { Response } from 'express'
 import type { AppRequest } from '../types/http.js'
 import { asyncHandler } from '../utils/async-handler.js'
 import { serializeDocument } from '../utils/serialize.js'
-import { phoneExistsQuerySchema } from '../validators/auth.validator.js'
+import { phoneExistsQuerySchema, updateProfileSchema } from '../validators/auth.validator.js'
 import { onboardingProgressSchema, onboardingSchema, onboardingSkipSchema } from '../validators/onboarding.validator.js'
 import { onboardBusiness } from '../services/account.service.js'
 import { getOnboardingStatus, saveOnboardingProgress, skipOnboarding } from '../services/onboarding.service.js'
-import { phoneExists as phoneExistsService } from '../services/user.service.js'
+import { phoneExists as phoneExistsService, updateUserProfile } from '../services/user.service.js'
 
 export const getMe = asyncHandler(async (req: AppRequest, res: Response) => {
   const onboardingStatus = await getOnboardingStatus(req.context!.userId)
@@ -22,6 +22,19 @@ export const getMe = asyncHandler(async (req: AppRequest, res: Response) => {
       subscriptionStatus: req.context?.subscriptionStatus,
       subscriptionEndsAt: req.context?.subscriptionEndsAt?.toISOString() ?? null,
       onboardingStatus
+    }
+  })
+})
+
+export const updateMe = asyncHandler(async (req: AppRequest, res: Response) => {
+  const body = updateProfileSchema.parse(req.body)
+  const user = await updateUserProfile(req.context!.userId, body)
+  res.json({
+    data: {
+      userId: user._id.toString(),
+      fullName: user.fullName ?? null,
+      phone: user.phone ?? null,
+      email: user.email ?? null
     }
   })
 })

@@ -14,7 +14,9 @@ export const createPurchaseOrderSchema = z.object({
   shippingCost: z.number().min(0).optional(),
   amountPaid: z.number().min(0).optional(),
   paymentTerms: z.string().trim().optional(),
-  expectedDeliveryDate: z.coerce.date().nullable().optional()
+  expectedDeliveryDate: z.coerce.date().nullable().optional(),
+  // When true, the purchase is created and immediately received so stock increases at once.
+  receiveImmediately: z.boolean().optional()
 })
 
 export const receivePurchaseOrderSchema = z.object({

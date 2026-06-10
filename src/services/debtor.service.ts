@@ -157,6 +157,30 @@ export async function addDebtorPurchase(
   return debtor
 }
 
+export async function reverseDebtorPurchase(
+  context: RequestContext,
+  branchId: Types.ObjectId,
+  debtorId: Types.ObjectId,
+  amount: number,
+  session?: ClientSession
+) {
+  const activeSession = session?.inTransaction() ? session : undefined
+  const debtor = await DebtorModel.findOne({
+    _id: debtorId,
+    businessAccountId: context.businessAccountId,
+    branchId,
+    isActive: true
+  }).session(activeSession ?? null)
+  // Debtor may have been deactivated/removed; nothing to reverse
+  if (!debtor) return null
+
+  debtor.currentDebt = Math.max(debtor.currentDebt - amount, 0)
+  debtor.totalPurchases = Math.max(debtor.totalPurchases - amount, 0)
+  debtor.paymentStatus = getPaymentStatus(debtor.currentDebt, debtor.dueDate)
+  await debtor.save(activeSession ? { session: activeSession } : undefined)
+  return debtor
+}
+
 function serializeDebtor(debtor: { toObject(options?: unknown): unknown }) {
   return normalizeMongo(debtor.toObject({ versionKey: false })) as Record<string, unknown>
 }

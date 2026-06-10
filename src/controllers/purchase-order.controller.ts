@@ -3,7 +3,7 @@ import type { AppRequest } from '../types/http.js'
 import { asyncHandler } from '../utils/async-handler.js'
 import { objectIdSchema, toObjectId } from '../validators/common.js'
 import { createPurchaseOrderSchema, receivePurchaseOrderSchema } from '../validators/purchase-order.validator.js'
-import { approvePurchaseOrder, cancelPurchaseOrder, createPurchaseOrder, getPurchaseOrder, listPurchaseOrders, receivePurchaseOrder } from '../services/purchase-order.service.js'
+import { approvePurchaseOrder, cancelPurchaseOrder, createAndReceivePurchaseOrder, createPurchaseOrder, getPurchaseOrder, listPurchaseOrders, receivePurchaseOrder } from '../services/purchase-order.service.js'
 
 export const list = asyncHandler(async (req: AppRequest, res: Response) => {
   const branchId = toObjectId(objectIdSchema.parse(req.params.branchId))
@@ -12,14 +12,16 @@ export const list = asyncHandler(async (req: AppRequest, res: Response) => {
 
 export const create = asyncHandler(async (req: AppRequest, res: Response) => {
   const branchId = toObjectId(objectIdSchema.parse(req.params.branchId))
-  const body = createPurchaseOrderSchema.parse(req.body)
-  res.status(201).json({
-    data: await createPurchaseOrder(req.context!, branchId, {
-      ...body,
-      supplierId: toObjectId(body.supplierId),
-      items: body.items.map((item) => ({ ...item, productId: toObjectId(item.productId) }))
-    })
-  })
+  const { receiveImmediately, ...body } = createPurchaseOrderSchema.parse(req.body)
+  const payload = {
+    ...body,
+    supplierId: toObjectId(body.supplierId),
+    items: body.items.map((item) => ({ ...item, productId: toObjectId(item.productId) }))
+  }
+  const data = receiveImmediately
+    ? await createAndReceivePurchaseOrder(req.context!, branchId, payload)
+    : await createPurchaseOrder(req.context!, branchId, payload)
+  res.status(201).json({ data })
 })
 
 export const get = asyncHandler(async (req: AppRequest, res: Response) => {

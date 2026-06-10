@@ -76,6 +76,110 @@ export async function createPurchaseOrder(context: RequestContext, branchId: Typ
   })
 }
 
+/**
+ * Simple "Record Purchase" flow: create a purchase order and immediately receive all
+ * ordered quantities in a single transaction. Stock increases right away, the supplier
+ * balance/payable is updated, and a ledger + stock-movement trail is written — matching
+ * the spec's "when a purchase is created, inventory increases in the selected branch".
+ */
+export async function createAndReceivePurchaseOrder(context: RequestContext, branchId: Types.ObjectId, input: CreatePurchaseOrderInput) {
+  requireManagerRole(context)
+  await getBranchForContext(context, branchId)
+  const businessAccountId = context.businessAccountId!
+
+  return withTransaction(async (session) => {
+    const activeSession = session.inTransaction() ? session : undefined
+    const items = []
+    let subtotal = 0
+    for (const item of input.items) {
+      const product = await ProductModel.findOne({ _id: item.productId, businessAccountId, isActive: true }).session(activeSession ?? null)
+      if (!product) throw notFound('Product not found')
+      const inventory = await InventoryItemModel.findOne({ businessAccountId, branchId, productId: item.productId, status: { $ne: 'discontinued' } }).session(activeSession ?? null)
+      if (!inventory) throw notFound('Product must exist in branch inventory before purchase')
+      const lineTotal = item.quantityOrdered * item.unitCostPrice
+      subtotal += lineTotal
+      items.push({ productId: item.productId, productName: product.name, quantityOrdered: item.quantityOrdered, quantityReceived: item.quantityOrdered, unitCostPrice: item.unitCostPrice, lineTotal })
+    }
+    const taxAmount = input.taxAmount ?? 0
+    const shippingCost = input.shippingCost ?? 0
+    const amountPaid = input.amountPaid ?? 0
+    const totalAmount = subtotal + taxAmount + shippingCost
+    if (amountPaid > totalAmount) throw new ApiError(422, 'payment_exceeds_total', 'Amount paid cannot exceed purchase total')
+
+    const now = new Date()
+    const [order] = await PurchaseOrderModel.create(
+      [
+        {
+          businessAccountId,
+          branchId,
+          supplierId: input.supplierId,
+          poNumber: await nextPoNumber(businessAccountId, activeSession),
+          items,
+          subtotal,
+          taxAmount,
+          shippingCost,
+          totalAmount,
+          amountPaid,
+          outstandingAmount: totalAmount - amountPaid,
+          paymentTerms: input.paymentTerms,
+          expectedDeliveryDate: input.expectedDeliveryDate ?? null,
+          status: 'received',
+          approvedBy: context.userId,
+          approvedAt: now,
+          receivedBy: context.userId,
+          receivedAt: now,
+          createdBy: context.userId
+        }
+      ],
+      activeSession ? { session: activeSession } : {}
+    )
+
+    for (const item of input.items) {
+      const inventory = await InventoryItemModel.findOne({ businessAccountId, branchId, productId: item.productId, status: { $ne: 'discontinued' } }).session(activeSession ?? null)
+      if (!inventory) throw notFound('Product must exist in branch inventory before receiving purchase')
+      const previousQuantity = inventory.quantity
+      inventory.quantity += item.quantityOrdered
+      inventory.availableQuantity = Math.max(inventory.quantity - inventory.reservedQuantity, 0)
+      inventory.lastCostPrice = item.unitCostPrice
+      inventory.costPrice = item.unitCostPrice
+      inventory.averageCostPrice = getWeightedAverageCost(previousQuantity, inventory.averageCostPrice, item.quantityOrdered, item.unitCostPrice)
+      inventory.stockValue = inventory.quantity * inventory.costPrice
+      inventory.status = getInventoryStatus(inventory.quantity, inventory.reorderLevel)
+      inventory.lastMovementAt = now
+      inventory.version += 1
+      await inventory.save(activeSession ? { session: activeSession } : undefined)
+
+      await StockMovementModel.create(
+        [
+          {
+            businessAccountId,
+            branchId,
+            productId: item.productId,
+            movementType: 'purchase',
+            quantity: item.quantityOrdered,
+            direction: 'in',
+            previousQuantity,
+            newQuantity: inventory.quantity,
+            unitCostPrice: item.unitCostPrice,
+            totalValue: item.quantityOrdered * item.unitCostPrice,
+            referenceType: 'purchase_order',
+            referenceId: order._id,
+            reason: `Purchase ${order.poNumber}`,
+            createdBy: context.userId
+          }
+        ],
+        activeSession ? { session: activeSession } : {}
+      )
+
+      await updateLowStockAlert(businessAccountId, branchId, item.productId, inventory, activeSession)
+    }
+
+    const payableIncrease = Math.max(subtotal - amountPaid, 0)
+    if (payableIncrease > 0) await addSupplierPurchaseBalance(context, branchId, order.supplierId, payableIncrease, order._id, activeSession)
+    return serializePurchaseOrder(order)
+  })
+}
+
 export async function getPurchaseOrder(context: RequestContext, branchId: Types.ObjectId, purchaseOrderId: Types.ObjectId) {
   requireManagerRole(context)
   await getBranchForContext(context, branchId)
