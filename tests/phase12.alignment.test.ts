@@ -6,6 +6,8 @@ import { MongoMemoryReplSet } from 'mongodb-memory-server'
 import { createApp } from '../src/app.js'
 import type { AuthUser } from '../src/types/http.js'
 import type { FirebaseTokenVerifier } from '../src/config/firebase.js'
+import { BranchModel, ensureBranchIdentityIndexes } from '../src/models/branch.model.js'
+import { BusinessAccountModel } from '../src/models/business-account.model.js'
 
 class FakeVerifier implements FirebaseTokenVerifier {
   constructor(private readonly users: Record<string, AuthUser>) {}
@@ -134,6 +136,43 @@ describe('Phase 12 PDF alignment: sale reversal, record purchase, profile', () =
     expect(supplierDetail.body.data.ledger[0].entryType).toBe('purchase')
   })
 
+  it('self-heals a legacy plain-unique branchCode index so multiple code-less branches are allowed', async () => {
+    const onboarded = await onboardOwner() // first branch has no branchCode
+    expect(onboarded.status).toBe(201)
+    await BusinessAccountModel.updateOne(
+      {},
+      { $set: { planTier: 'paid', subscriptionStatus: 'active', subscriptionEndsAt: futureDate() } }
+    )
+
+    // Recreate the legacy production index: a plain unique index (no partial filter).
+    // The onboarding branch defaults to branchCode 'MAIN', so the index builds cleanly.
+    await BranchModel.collection.dropIndex('businessAccountId_1_branchCode_1').catch(() => undefined)
+    await BranchModel.collection.createIndex({ businessAccountId: 1, branchCode: 1 }, { unique: true })
+
+    // First code-less branch is fine (only one null branchCode so far)
+    const first = await request(app)
+      .post('/api/v1/branches')
+      .set('Authorization', 'Bearer owner')
+      .send({ name: 'Second Branch', location: { address: '2 St', city: 'Nairobi' }, contact: { phone: '+254711111111' } })
+    expect(first.status).toBe(201)
+
+    // Second code-less branch collides on { branchCode: null } under the stale plain index
+    const blocked = await request(app)
+      .post('/api/v1/branches')
+      .set('Authorization', 'Bearer owner')
+      .send({ name: 'Third Branch', location: { address: '3 St', city: 'Nairobi' }, contact: { phone: '+254722222222' } })
+    expect(blocked.status).toBe(500)
+
+    // The startup reconciliation drops the stale index and recreates the partial one
+    await ensureBranchIdentityIndexes()
+
+    const ok = await request(app)
+      .post('/api/v1/branches')
+      .set('Authorization', 'Bearer owner')
+      .send({ name: 'Fourth Branch', location: { address: '4 St', city: 'Nairobi' }, contact: { phone: '+254733333333' } })
+    expect(ok.status).toBe(201)
+  })
+
   it('persists a user-set profile name and does not clobber it from the auth token', async () => {
     await onboardOwner()
 
@@ -161,6 +200,10 @@ function onboardOwner() {
     business: { businessName: 'Faham Test Shop', businessType: 'retail', country: 'Kenya', currency: 'KES' },
     branch: { name: 'Main Branch', location: { address: '123 Test Street', city: 'Nairobi' }, contact: { phone: '+254700000000' } }
   })
+}
+
+function futureDate() {
+  return new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
 }
 
 function createProduct(branchId: string, name: string, sku: string, initialQuantity: number, costPrice: number) {

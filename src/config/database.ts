@@ -1,10 +1,14 @@
 import mongoose from 'mongoose'
 import { env } from './env.js'
 import { ensureProductIdentityIndexes } from '../models/product.model.js'
+import { ensureBranchIdentityIndexes } from '../models/branch.model.js'
 
 export async function connectDatabase(uri = env.MONGODB_URI) {
   mongoose.set('strictQuery', true)
   await mongoose.connect(uri)
+  // Runs in production too: legacy deployments carry a stale plain-unique index on
+  // (businessAccountId, branchCode) that blocks creating a second branch without a code.
+  await ensureBranchIdentityIndexes()
   if (env.NODE_ENV !== 'production') {
     await ensureProductIdentityIndexes()
   }
