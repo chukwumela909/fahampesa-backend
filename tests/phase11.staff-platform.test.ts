@@ -123,6 +123,20 @@ describe('Staff, platform admin utilities, and notifications', () => {
     expect(listed.body.data[0].tokenHash).toBeUndefined()
 
     const token = tokenFromInviteUrl(created.body.data.inviteUrl)
+
+    // The invitee can look up the invitation context by token before accepting
+    const lookup = await request(app)
+      .get(`/api/v1/staff/invitations/lookup?token=${encodeURIComponent(token)}`)
+      .set('Authorization', 'Bearer invitee')
+    expect(lookup.status).toBe(200)
+    expect(lookup.body.data.email).toBe('invitee@example.com')
+    expect(lookup.body.data.role).toBe('cashier')
+    expect(lookup.body.data.status).toBe('pending')
+    expect(lookup.body.data.expired).toBe(false)
+    expect(lookup.body.data.businessName).toBeTruthy()
+    expect(lookup.body.data.branchNames).toHaveLength(1)
+    expect(lookup.body.data.tokenHash).toBeUndefined()
+
     const mismatch = await request(app)
       .post('/api/v1/staff/invitations/accept')
       .set('Authorization', 'Bearer wrongInvitee')

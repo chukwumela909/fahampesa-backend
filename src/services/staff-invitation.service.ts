@@ -3,6 +3,8 @@ import { Types, type ClientSession, type HydratedDocument } from 'mongoose'
 import { env } from '../config/env.js'
 import { StaffInvitationModel, type StaffInvitationDocument } from '../models/staff-invitation.model.js'
 import { BusinessMembershipModel } from '../models/business-membership.model.js'
+import { BusinessAccountModel } from '../models/business-account.model.js'
+import { BranchModel } from '../models/branch.model.js'
 import { UserModel } from '../models/user.model.js'
 import type { RequestContext } from '../types/http.js'
 import { ApiError } from '../utils/api-error.js'
@@ -103,6 +105,32 @@ export async function cancelStaffInvitation(context: RequestContext, invitationI
   invitation.cancelledAt = new Date()
   await invitation.save()
   return serializeInvitation(invitation)
+}
+
+/**
+ * Look up an invitation by its raw token to show the invitee what they were invited to.
+ * Returns only non-sensitive context (no token hash). Requires a valid token (the secret).
+ */
+export async function lookupStaffInvitation(token: string) {
+  const tokenHash = hashInvitationToken(token)
+  const invitation = await StaffInvitationModel.findOne({ tokenHash }).select('+tokenHash')
+  if (!invitation) throw new ApiError(404, 'invitation_not_found', 'Staff invitation not found')
+
+  const [account, branches] = await Promise.all([
+    BusinessAccountModel.findById(invitation.businessAccountId).select('businessName').lean(),
+    BranchModel.find({ _id: { $in: invitation.assignedBranchIds } }).select('name').lean()
+  ])
+
+  return {
+    email: invitation.email,
+    role: invitation.role,
+    sourceRole: invitation.sourceRole,
+    status: invitation.status,
+    expiresAt: invitation.expiresAt.toISOString(),
+    expired: invitation.expiresAt.getTime() <= Date.now(),
+    businessName: account?.businessName ?? 'this business',
+    branchNames: branches.map((branch) => branch.name)
+  }
 }
 
 export async function acceptStaffInvitation(context: RequestContext, token: string) {

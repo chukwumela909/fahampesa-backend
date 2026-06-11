@@ -4,7 +4,8 @@ import { asyncHandler } from '../utils/async-handler.js'
 import { objectIdSchema, toObjectId } from '../validators/common.js'
 import { activityLogQuerySchema, acceptStaffInvitationSchema, createActivityLogSchema, createStaffInvitationSchema, createStaffSchema, staffInvitationListQuerySchema, staffListQuerySchema, updateStaffSchema, verifyTwoFactorSchema } from '../validators/staff.validator.js'
 import { activateStaff, createStaff, deactivateStaff, disableStaffTwoFactor, getStaff, listStaff, listStaffActivityLogs, setupStaffTwoFactor, updateStaff, verifyStaffTwoFactor, writeStaffActivity } from '../services/staff.service.js'
-import { acceptStaffInvitation, cancelStaffInvitation, inviteStaff, listStaffInvitations } from '../services/staff-invitation.service.js'
+import { acceptStaffInvitation, cancelStaffInvitation, inviteStaff, listStaffInvitations, lookupStaffInvitation } from '../services/staff-invitation.service.js'
+import { ApiError } from '../utils/api-error.js'
 
 export const list = asyncHandler(async (req: AppRequest, res: Response) => {
   const query = staffListQuerySchema.parse(req.query)
@@ -33,6 +34,12 @@ export const cancelInvitation = asyncHandler(async (req: AppRequest, res: Respon
 export const acceptInvitation = asyncHandler(async (req: AppRequest, res: Response) => {
   const body = acceptStaffInvitationSchema.parse(req.body)
   res.json({ data: await acceptStaffInvitation(req.context!, body.token) })
+})
+
+export const lookupInvitation = asyncHandler(async (req: AppRequest, res: Response) => {
+  const token = typeof req.query.token === 'string' ? req.query.token.trim() : ''
+  if (!token) throw new ApiError(400, 'token_required', 'token is required')
+  res.json({ data: await lookupStaffInvitation(token) })
 })
 
 export const get = asyncHandler(async (req: AppRequest, res: Response) => {

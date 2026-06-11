@@ -1,10 +1,12 @@
 import { Router } from 'express'
-import { acceptInvitation, activate, cancelInvitation, create, createInvitation, createLog, disableTwoFactor, get, list, listInvitations, logs, remove, setupTwoFactor, update, verifyTwoFactor } from '../controllers/staff.controller.js'
+import { acceptInvitation, activate, cancelInvitation, create, createInvitation, createLog, disableTwoFactor, get, list, listInvitations, logs, lookupInvitation, remove, setupTwoFactor, update, verifyTwoFactor } from '../controllers/staff.controller.js'
 import { requireBusinessContext, requireWriteAccess } from '../middleware/auth.js'
 
 export const staffRouter = Router()
 
+// Invitation accept/lookup only need an authenticated user (no business context yet)
 staffRouter.post('/invitations/accept', acceptInvitation)
+staffRouter.get('/invitations/lookup', lookupInvitation)
 staffRouter.use(requireBusinessContext)
 staffRouter.get('/invitations', listInvitations)
 staffRouter.post('/invitations', requireWriteAccess, createInvitation)
