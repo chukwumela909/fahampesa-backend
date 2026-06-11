@@ -46,6 +46,10 @@ const saleSchema = new Schema(
     isDeleted: { type: Boolean, default: false, index: true },
     deletedAt: { type: Date, default: null },
     deletedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
+    isRefunded: { type: Boolean, default: false, index: true },
+    refundedAt: { type: Date, default: null },
+    refundedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
+    refundReason: { type: String, trim: true },
     version: { type: Number, default: 1 }
   },
   { timestamps: true }

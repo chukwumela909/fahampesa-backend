@@ -105,6 +105,59 @@ describe('Phase 12 PDF alignment: sale reversal, record purchase, profile', () =
     expect(owedAfterDelete.body.data.currentDebt).toBe(0)
   })
 
+  it('refunds a full sale: restocks inventory, records the refund, and excludes it from sales revenue', async () => {
+    const onboarded = await onboardOwner()
+    const branchId = onboarded.body.data.branch.id
+    const product = await createProduct(branchId, 'Soap 500g', 'SOAP-500', 10, 100)
+    const productId = product.body.data.id
+
+    const sale = await request(app)
+      .post(`/api/v1/branches/${branchId}/sales`)
+      .set('Authorization', 'Bearer owner')
+      .send({ items: [{ productId, quantity: 3, unitPrice: 150 }], paymentMethod: 'cash' })
+    expect(sale.status).toBe(201)
+    const saleId = sale.body.data.id
+    const saleTotal = sale.body.data.totalAmount
+
+    // Sales revenue includes the sale before refund
+    const beforeReport = await request(app).get(`/api/v1/reports/sales?branchId=${branchId}`).set('Authorization', 'Bearer owner')
+    expect(beforeReport.body.data.totalSales).toBe(saleTotal)
+
+    const refunded = await request(app)
+      .post(`/api/v1/branches/${branchId}/sales/${saleId}/refund`)
+      .set('Authorization', 'Bearer owner')
+      .send({ reason: 'Customer returned items' })
+    expect(refunded.status).toBe(200)
+    expect(refunded.body.data.sale.isRefunded).toBe(true)
+    expect(refunded.body.data.refund.amount).toBe(saleTotal)
+    expect(refunded.body.data.refund.refundNumber).toMatch(/^REF-/)
+
+    // Stock is restored
+    const inventory = await request(app).get(`/api/v1/branches/${branchId}/inventory`).set('Authorization', 'Bearer owner')
+    expect(inventory.body.data[0].inventory.quantity).toBe(10)
+
+    // A return movement was recorded
+    const movements = await request(app).get(`/api/v1/branches/${branchId}/inventory/movements?productId=${productId}`).set('Authorization', 'Bearer owner')
+    expect(movements.body.data[0].movementType).toBe('return')
+
+    // Refund appears in the refunds list
+    const refundList = await request(app).get(`/api/v1/branches/${branchId}/sales/refunds`).set('Authorization', 'Bearer owner')
+    expect(refundList.body.data).toHaveLength(1)
+    expect(refundList.body.data[0].saleId).toBe(saleId)
+
+    // Sales report now excludes the refunded sale and surfaces the refund total
+    const afterReport = await request(app).get(`/api/v1/reports/sales?branchId=${branchId}`).set('Authorization', 'Bearer owner')
+    expect(afterReport.body.data.totalSales).toBe(0)
+    expect(afterReport.body.data.totalRefunds).toBe(saleTotal)
+
+    // A second refund is rejected
+    const again = await request(app)
+      .post(`/api/v1/branches/${branchId}/sales/${saleId}/refund`)
+      .set('Authorization', 'Bearer owner')
+      .send({ reason: 'duplicate' })
+    expect(again.status).toBe(409)
+  })
+
   it('records a purchase and increases stock immediately with receiveImmediately', async () => {
     const onboarded = await onboardOwner()
     const branchId = onboarded.body.data.branch.id

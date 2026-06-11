@@ -4,6 +4,7 @@ import { BranchModel } from '../models/branch.model.js'
 import { ExpenseModel } from '../models/expense.model.js'
 import { InventoryItemModel } from '../models/inventory-item.model.js'
 import { SaleModel } from '../models/sale.model.js'
+import { RefundModel } from '../models/refund.model.js'
 import { SupplierModel } from '../models/supplier.model.js'
 import type { RequestContext } from '../types/http.js'
 import { ApiError } from '../utils/api-error.js'
@@ -17,21 +18,26 @@ export interface ReportScopeInput {
 export async function dashboardReport(context: RequestContext, input: ReportScopeInput) {
   const branchIds = await resolveReportBranchIds(context, input.branchId)
   const dateRange = buildDateRange(input)
-  const saleQuery = { businessAccountId: context.businessAccountId, branchId: { $in: branchIds }, isDeleted: false, ...dateRange.createdAt }
+  // Refunded sales are excluded from revenue/profit; refunds are surfaced separately
+  const saleQuery = { businessAccountId: context.businessAccountId, branchId: { $in: branchIds }, isDeleted: false, isRefunded: { $ne: true }, ...dateRange.createdAt }
   const expenseQuery = { businessAccountId: context.businessAccountId, branchId: { $in: branchIds }, isDeleted: false, ...dateRange.date }
+  const refundQuery = { businessAccountId: context.businessAccountId, branchId: { $in: branchIds }, ...dateRange.createdAt }
 
-  const [sales, expenses, inventoryItems, lowStockAlerts, suppliers] = await Promise.all([
+  const [sales, expenses, inventoryItems, lowStockAlerts, suppliers, refunds] = await Promise.all([
     SaleModel.find(saleQuery),
     ExpenseModel.find(expenseQuery),
     InventoryItemModel.find({ businessAccountId: context.businessAccountId, branchId: { $in: branchIds }, status: { $ne: 'discontinued' } }),
     AlertModel.find({ businessAccountId: context.businessAccountId, branchId: { $in: branchIds }, alertType: 'low_stock', status: 'active' }),
-    SupplierModel.find({ businessAccountId: context.businessAccountId, branchId: { $in: branchIds }, status: 'active' })
+    SupplierModel.find({ businessAccountId: context.businessAccountId, branchId: { $in: branchIds }, status: 'active' }),
+    RefundModel.find(refundQuery)
   ])
 
   const data: Record<string, unknown> = {
     branchIds: branchIds.map((id) => id.toString()),
     salesCount: sales.length,
     totalSales: sum(sales, 'totalAmount'),
+    refundsCount: refunds.length,
+    totalRefunds: sum(refunds, 'amount'),
     expensesCount: expenses.length,
     inventoryItemCount: inventoryItems.length,
     lowStockCount: lowStockAlerts.length
@@ -51,17 +57,27 @@ export async function dashboardReport(context: RequestContext, input: ReportScop
 export async function salesReport(context: RequestContext, input: ReportScopeInput) {
   const branchIds = await resolveReportBranchIds(context, input.branchId)
   const dateRange = buildDateRange(input)
-  const sales = await SaleModel.find({
-    businessAccountId: context.businessAccountId,
-    branchId: { $in: branchIds },
-    isDeleted: false,
-    ...dateRange.createdAt
-  }).sort({ createdAt: -1 })
+  const [sales, refunds] = await Promise.all([
+    SaleModel.find({
+      businessAccountId: context.businessAccountId,
+      branchId: { $in: branchIds },
+      isDeleted: false,
+      isRefunded: { $ne: true },
+      ...dateRange.createdAt
+    }).sort({ createdAt: -1 }),
+    RefundModel.find({
+      businessAccountId: context.businessAccountId,
+      branchId: { $in: branchIds },
+      ...dateRange.createdAt
+    })
+  ])
 
   const data: Record<string, unknown> = {
     branchIds: branchIds.map((id) => id.toString()),
     count: sales.length,
     totalSales: sum(sales, 'totalAmount'),
+    refundsCount: refunds.length,
+    totalRefunds: sum(refunds, 'amount'),
     byPaymentMethod: groupSum(sales, 'paymentMethod', 'totalAmount')
   }
 
@@ -155,7 +171,7 @@ export async function branchPerformanceReport(context: RequestContext, input: Re
   const dateRange = buildDateRange(input)
   const [branches, sales, expenses, inventoryItems, suppliers] = await Promise.all([
     BranchModel.find({ _id: { $in: branchIds }, businessAccountId: context.businessAccountId }),
-    SaleModel.find({ businessAccountId: context.businessAccountId, branchId: { $in: branchIds }, isDeleted: false, ...dateRange.createdAt }),
+    SaleModel.find({ businessAccountId: context.businessAccountId, branchId: { $in: branchIds }, isDeleted: false, isRefunded: { $ne: true }, ...dateRange.createdAt }),
     ExpenseModel.find({ businessAccountId: context.businessAccountId, branchId: { $in: branchIds }, isDeleted: false, ...dateRange.date }),
     InventoryItemModel.find({ businessAccountId: context.businessAccountId, branchId: { $in: branchIds }, status: { $ne: 'discontinued' } }),
     SupplierModel.find({ businessAccountId: context.businessAccountId, branchId: { $in: branchIds }, status: 'active' })

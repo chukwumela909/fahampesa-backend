@@ -2,8 +2,8 @@ import type { Response } from 'express'
 import type { AppRequest } from '../types/http.js'
 import { asyncHandler } from '../utils/async-handler.js'
 import { objectIdSchema, toObjectId } from '../validators/common.js'
-import { createSaleSchema, updateSaleSchema } from '../validators/sale.validator.js'
-import { createSale, deleteSale, getSale, listSales, updateSale } from '../services/sale.service.js'
+import { createSaleSchema, refundSaleSchema, updateSaleSchema } from '../validators/sale.validator.js'
+import { createSale, deleteSale, getSale, listRefunds, listSales, refundSale, updateSale } from '../services/sale.service.js'
 
 export const list = asyncHandler(async (req: AppRequest, res: Response) => {
   const branchId = toObjectId(objectIdSchema.parse(req.params.branchId))
@@ -63,4 +63,17 @@ export const remove = asyncHandler(async (req: AppRequest, res: Response) => {
   const saleId = toObjectId(objectIdSchema.parse(req.params.saleId))
   const result = await deleteSale(req.context!, branchId, saleId)
   res.json({ data: result })
+})
+
+export const refund = asyncHandler(async (req: AppRequest, res: Response) => {
+  const branchId = toObjectId(objectIdSchema.parse(req.params.branchId))
+  const saleId = toObjectId(objectIdSchema.parse(req.params.saleId))
+  const body = refundSaleSchema.parse(req.body)
+  const result = await refundSale(req.context!, branchId, saleId, body)
+  res.json({ data: result })
+})
+
+export const refunds = asyncHandler(async (req: AppRequest, res: Response) => {
+  const branchId = toObjectId(objectIdSchema.parse(req.params.branchId))
+  res.json({ data: await listRefunds(req.context!, branchId) })
 })

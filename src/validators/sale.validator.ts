@@ -62,4 +62,8 @@ export const updateSaleSchema = z.object({
   notes: z.string().trim().optional()
 })
 
+export const refundSaleSchema = z.object({
+  reason: z.string().trim().max(500).optional()
+})
+
 export type CreateSaleBody = z.infer<typeof createSaleSchema>

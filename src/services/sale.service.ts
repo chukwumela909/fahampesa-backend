@@ -2,6 +2,7 @@ import type { ClientSession, Types } from 'mongoose'
 import { InventoryItemModel } from '../models/inventory-item.model.js'
 import { ProductModel } from '../models/product.model.js'
 import { SaleModel } from '../models/sale.model.js'
+import { RefundModel } from '../models/refund.model.js'
 import { StockMovementModel } from '../models/stock-movement.model.js'
 import type { RequestContext } from '../types/http.js'
 import { ApiError, notFound } from '../utils/api-error.js'
@@ -262,49 +263,8 @@ export async function deleteSale(context: RequestContext, branchId: Types.Object
     sale.version += 1
     await sale.save(activeSession ? { session: activeSession } : undefined)
 
-    // Restore stock that was deducted at sale time and record a compensating movement
-    for (const item of sale.items) {
-      const inventory = await InventoryItemModel.findOne({
-        businessAccountId,
-        branchId,
-        productId: item.productId
-      }).session(activeSession ?? null)
-      // Inventory item may have been discontinued/removed; skip restoration gracefully
-      if (!inventory) continue
-
-      const previousQuantity = inventory.quantity
-      inventory.quantity += item.quantity
-      inventory.availableQuantity = Math.max(inventory.quantity - inventory.reservedQuantity, 0)
-      inventory.stockValue = inventory.quantity * inventory.costPrice
-      inventory.status = getInventoryStatus(inventory.quantity, inventory.reorderLevel)
-      inventory.lastMovementAt = new Date()
-      inventory.version += 1
-      await inventory.save(activeSession ? { session: activeSession } : undefined)
-
-      await StockMovementModel.create(
-        [
-          {
-            businessAccountId,
-            branchId,
-            productId: item.productId,
-            movementType: 'return',
-            quantity: item.quantity,
-            direction: 'in',
-            previousQuantity,
-            newQuantity: inventory.quantity,
-            unitCostPrice: inventory.costPrice,
-            totalValue: item.quantity * inventory.costPrice,
-            referenceType: 'sale',
-            referenceId: sale._id,
-            reason: `Sale ${sale.saleNumber} deleted`,
-            createdBy: context.userId
-          }
-        ],
-        activeSession ? { session: activeSession } : {}
-      )
-
-      await updateLowStockAlert(businessAccountId, branchId, item.productId, inventory, activeSession)
-    }
+    // Restore stock that was deducted at sale time and record compensating movements
+    await restoreSaleStock(context, businessAccountId, branchId, sale, `Sale ${sale.saleNumber} deleted`, activeSession)
 
     // Reverse the receivable created for credit sales
     if (sale.paymentMethod === 'credit' && sale.customer?.debtorId) {
@@ -328,6 +288,165 @@ export async function deleteSale(context: RequestContext, branchId: Types.Object
 
     return { deleted: true }
   })
+}
+
+/**
+ * Refund a full sale: mark it refunded (kept in history), restock all items to the
+ * branch, reverse the debtor balance for credit sales, and write a durable Refund
+ * record for reporting/audit. Allowed for any branch user (cashiers included) on
+ * their assigned branch; branch access is enforced by getBranchForContext.
+ */
+export async function refundSale(
+  context: RequestContext,
+  branchId: Types.ObjectId,
+  saleId: Types.ObjectId,
+  input: { reason?: string }
+) {
+  if (!context.businessAccountId || !context.role) throw new ApiError(403, 'business_required', 'Business context required')
+  await getBranchForContext(context, branchId)
+  const businessAccountId = context.businessAccountId
+
+  return withTransaction(async (session) => {
+    const activeSession = session.inTransaction() ? session : undefined
+    const sale = await SaleModel.findOne({
+      _id: saleId,
+      businessAccountId,
+      branchId,
+      isDeleted: false
+    }).session(activeSession ?? null)
+    if (!sale) throw notFound('Sale not found')
+    if (sale.isRefunded) throw new ApiError(409, 'sale_already_refunded', 'Sale has already been refunded')
+
+    sale.isRefunded = true
+    sale.refundedAt = new Date()
+    sale.refundedBy = context.userId
+    sale.refundReason = input.reason
+    sale.version += 1
+    await sale.save(activeSession ? { session: activeSession } : undefined)
+
+    const restockedUnits = await restoreSaleStock(
+      context,
+      businessAccountId,
+      branchId,
+      sale,
+      `Sale ${sale.saleNumber} refunded`,
+      activeSession
+    )
+
+    // Reverse the receivable created for credit sales
+    if (sale.paymentMethod === 'credit' && sale.customer?.debtorId) {
+      await reverseDebtorPurchase(context, branchId, sale.customer.debtorId, sale.totalAmount, activeSession)
+    }
+
+    const [refund] = await RefundModel.create(
+      [
+        {
+          businessAccountId,
+          branchId,
+          saleId: sale._id,
+          saleNumber: sale.saleNumber,
+          refundNumber: await nextRefundNumber(businessAccountId, activeSession),
+          amount: sale.totalAmount,
+          paymentMethod: sale.paymentMethod,
+          reason: input.reason,
+          itemCount: restockedUnits,
+          restocked: true,
+          createdBy: context.userId
+        }
+      ],
+      activeSession ? { session: activeSession } : {}
+    )
+
+    await writeAuditLog(
+      {
+        scope: 'business',
+        businessAccountId,
+        actorUserId: context.userId,
+        actorRole: context.role,
+        action: 'sale.refunded',
+        targetType: 'sale',
+        targetId: sale._id,
+        branchId,
+        metadata: { saleNumber: sale.saleNumber, refundNumber: refund.refundNumber, totalAmount: sale.totalAmount }
+      },
+      activeSession
+    )
+
+    return {
+      sale: serializeSale(sale, context),
+      refund: normalizeMongo(refund.toObject({ versionKey: false }))
+    }
+  })
+}
+
+export async function listRefunds(context: RequestContext, branchId: Types.ObjectId) {
+  await getBranchForContext(context, branchId)
+  const refunds = await RefundModel.find({ businessAccountId: context.businessAccountId, branchId }).sort({ createdAt: -1 })
+  return refunds.map((refund) => normalizeMongo(refund.toObject({ versionKey: false })))
+}
+
+/**
+ * Restore the units from a sale back into branch inventory and write a 'return'
+ * stock movement per line. Returns the total number of units restocked. Inventory
+ * items that have since been removed/discontinued are skipped gracefully.
+ */
+async function restoreSaleStock(
+  context: RequestContext,
+  businessAccountId: Types.ObjectId,
+  branchId: Types.ObjectId,
+  sale: { items: { productId: Types.ObjectId; quantity: number }[]; _id: Types.ObjectId; saleNumber: string },
+  reason: string,
+  session?: ClientSession
+) {
+  let restockedUnits = 0
+  for (const item of sale.items) {
+    const inventory = await InventoryItemModel.findOne({
+      businessAccountId,
+      branchId,
+      productId: item.productId
+    }).session(session ?? null)
+    if (!inventory) continue
+
+    const previousQuantity = inventory.quantity
+    inventory.quantity += item.quantity
+    inventory.availableQuantity = Math.max(inventory.quantity - inventory.reservedQuantity, 0)
+    inventory.stockValue = inventory.quantity * inventory.costPrice
+    inventory.status = getInventoryStatus(inventory.quantity, inventory.reorderLevel)
+    inventory.lastMovementAt = new Date()
+    inventory.version += 1
+    await inventory.save(session ? { session } : undefined)
+
+    await StockMovementModel.create(
+      [
+        {
+          businessAccountId,
+          branchId,
+          productId: item.productId,
+          movementType: 'return',
+          quantity: item.quantity,
+          direction: 'in',
+          previousQuantity,
+          newQuantity: inventory.quantity,
+          unitCostPrice: inventory.costPrice,
+          totalValue: item.quantity * inventory.costPrice,
+          referenceType: 'sale',
+          referenceId: sale._id,
+          reason,
+          createdBy: context.userId
+        }
+      ],
+      session ? { session } : {}
+    )
+
+    await updateLowStockAlert(businessAccountId, branchId, item.productId, inventory, session)
+    restockedUnits += item.quantity
+  }
+  return restockedUnits
+}
+
+async function nextRefundNumber(businessAccountId: Types.ObjectId, session?: ClientSession) {
+  const count = await RefundModel.countDocuments({ businessAccountId }).session(session ?? null)
+  return `REF-${String(count + 1).padStart(6, '0')}`
 }
 
 export function serializeSale(sale: { toObject(options?: unknown): unknown }, context: RequestContext) {
