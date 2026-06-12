@@ -2,15 +2,21 @@ import { z } from 'zod'
 
 export const planTypeSchema = z.enum(['monthly', 'yearly'])
 
+// ISO 3166-1 alpha-2 country detected on the client (IP geolocation). Used to gate
+// which payment provider is allowed based on the user's CURRENT location.
+const countrySchema = z.string().trim().optional()
+
 export const mpesaCheckoutSchema = z.object({
   planType: planTypeSchema,
-  phoneNumber: z.string().trim().min(7)
+  phoneNumber: z.string().trim().min(7),
+  country: countrySchema
 })
 
 export const stripeCheckoutSchema = z.object({
   planType: planTypeSchema,
   successUrl: z.string().trim().url().optional(),
-  cancelUrl: z.string().trim().url().optional()
+  cancelUrl: z.string().trim().url().optional(),
+  country: countrySchema
 })
 
 const normalizedMpesaCallbackSchema = z.object({

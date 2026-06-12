@@ -112,7 +112,7 @@ describe('Phase 8 production subscription billing', () => {
     const checkout = await request(app)
       .post('/api/v1/billing/mpesa/stk-push')
       .set('Authorization', 'Bearer owner')
-      .send({ planType: 'monthly', phoneNumber: '+254 712 345 678', amount: 1 })
+      .send({ planType: 'monthly', phoneNumber: '+254 712 345 678', amount: 1, country: 'KE' })
     expect(checkout.status).toBe(201)
     expect(checkout.body.data.provider).toBe('mpesa')
     expect(checkout.body.data.subscription.currency).toBe('KSH')
@@ -150,7 +150,7 @@ describe('Phase 8 production subscription billing', () => {
     const renewal = await request(app)
       .post('/api/v1/billing/mpesa/stk-push')
       .set('Authorization', 'Bearer owner')
-      .send({ planType: 'monthly', phoneNumber: '0712345678' })
+      .send({ planType: 'monthly', phoneNumber: '0712345678', country: 'KE' })
     expect(renewal.status).toBe(201)
     const accountWhileRenewalPending = await BusinessAccountModel.findOne({}).orFail()
     expect(accountWhileRenewalPending.subscriptionStatus).toBe('active')
@@ -170,7 +170,7 @@ describe('Phase 8 production subscription billing', () => {
     const activeCheckout = await request(app)
       .post('/api/v1/billing/mpesa/stk-push')
       .set('Authorization', 'Bearer owner')
-      .send({ planType: 'monthly', phoneNumber: '+254712345678' })
+      .send({ planType: 'monthly', phoneNumber: '+254712345678', country: 'KE' })
     await request(app).post('/api/v1/webhooks/mpesa/callback').send(mpesaCallbackBody({
       checkoutRequestId: activeCheckout.body.data.subscription.checkoutRequestId,
       merchantRequestId: activeCheckout.body.data.subscription.merchantRequestId,
@@ -180,7 +180,7 @@ describe('Phase 8 production subscription billing', () => {
     const failedRenewal = await request(app)
       .post('/api/v1/billing/mpesa/stk-push')
       .set('Authorization', 'Bearer owner')
-      .send({ planType: 'monthly', phoneNumber: '+254712345678' })
+      .send({ planType: 'monthly', phoneNumber: '+254712345678', country: 'KE' })
     const failedCallback = await request(app).post('/api/v1/webhooks/mpesa/callback').send(mpesaCallbackBody({
       checkoutRequestId: failedRenewal.body.data.subscription.checkoutRequestId,
       merchantRequestId: failedRenewal.body.data.subscription.merchantRequestId,
@@ -208,7 +208,7 @@ describe('Phase 8 production subscription billing', () => {
     const checkout = await request(app)
       .post('/api/v1/billing/mpesa/stk-push')
       .set('Authorization', 'Bearer owner')
-      .send({ planType: 'monthly', phoneNumber: '+254712345678' })
+      .send({ planType: 'monthly', phoneNumber: '+254712345678', country: 'KE' })
 
     const callback = await request(app).post('/api/v1/webhooks/mpesa/callback').send(mpesaCallbackBody({
       checkoutRequestId: checkout.body.data.subscription.checkoutRequestId,
@@ -344,6 +344,40 @@ describe('Phase 8 production subscription billing', () => {
       .send(signedIgnored.body)
     expect(ignored.status).toBe(200)
     expect(ignored.body.data.processingStatus).toBe('ignored')
+  })
+
+  it('gates the payment provider on current location, not the onboarding region', async () => {
+    // Kenya-onboarded owner currently abroad: M-Pesa blocked, Stripe allowed.
+    await onboardOwner('owner', 'Kenya')
+    const mpesaAbroad = await request(app)
+      .post('/api/v1/billing/mpesa/stk-push')
+      .set('Authorization', 'Bearer owner')
+      .send({ planType: 'monthly', phoneNumber: '+254712345678', country: 'US' })
+    expect(mpesaAbroad.status).toBe(422)
+    expect(mpesaAbroad.body.error.code).toBe('mpesa_not_available')
+
+    const stripeAbroad = await request(app)
+      .post('/api/v1/billing/stripe/checkout-session')
+      .set('Authorization', 'Bearer owner')
+      .send({ planType: 'monthly', country: 'US' })
+    expect(stripeAbroad.status).toBe(201)
+    expect(stripeAbroad.body.data.provider).toBe('stripe')
+
+    // Non-Kenya-onboarded owner currently in Kenya: M-Pesa allowed, card blocked.
+    await onboardOwner('ownerOther', 'Uganda')
+    const mpesaInKenya = await request(app)
+      .post('/api/v1/billing/mpesa/stk-push')
+      .set('Authorization', 'Bearer ownerOther')
+      .send({ planType: 'monthly', phoneNumber: '+254712345678', country: 'KE' })
+    expect(mpesaInKenya.status).toBe(201)
+    expect(mpesaInKenya.body.data.provider).toBe('mpesa')
+
+    const stripeInKenya = await request(app)
+      .post('/api/v1/billing/stripe/checkout-session')
+      .set('Authorization', 'Bearer ownerOther')
+      .send({ planType: 'monthly', country: 'KE' })
+    expect(stripeInKenya.status).toBe(422)
+    expect(stripeInKenya.body.error.code).toBe('stripe_not_available')
   })
 
   it('keeps business sales payment methods record-only', async () => {

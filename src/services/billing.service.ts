@@ -139,11 +139,13 @@ export async function activateMonthlySubscription(context: RequestContext, reque
   })
 }
 
-export async function startMpesaCheckout(context: RequestContext, input: { planType: PlanType; phoneNumber: string }) {
+export async function startMpesaCheckout(context: RequestContext, input: { planType: PlanType; phoneNumber: string; country?: string }) {
   requireOwner(context)
   const account = await BusinessAccountModel.findById(context.businessAccountId)
   if (!account) throw notFound('Business account not found')
-  if (account.billingRegion !== 'KENYA') throw new ApiError(422, 'mpesa_not_available', 'M-Pesa checkout is only available for Kenya accounts')
+  // Provider is gated on the user's CURRENT location (IP-detected on the client),
+  // not the onboarding region — M-Pesa is only available while in Kenya.
+  if (normalizeCountry(input.country) !== 'KE') throw new ApiError(422, 'mpesa_not_available', 'M-Pesa is only available when you are in Kenya')
 
   const price = PLAN_PRICES[input.planType].KENYA
   const normalizedPhoneNumber = normalizeKenyaPhoneNumber(input.phoneNumber)
@@ -186,11 +188,12 @@ export async function startMpesaCheckout(context: RequestContext, input: { planT
   }
 }
 
-export async function startStripeCheckout(context: RequestContext, input: { planType: PlanType; successUrl?: string; cancelUrl?: string }) {
+export async function startStripeCheckout(context: RequestContext, input: { planType: PlanType; successUrl?: string; cancelUrl?: string; country?: string }) {
   requireOwner(context)
   const account = await BusinessAccountModel.findById(context.businessAccountId)
   if (!account) throw notFound('Business account not found')
-  if (account.billingRegion === 'KENYA') throw new ApiError(422, 'stripe_not_available', 'Stripe checkout is only available for non-Kenya accounts')
+  // Users currently in Kenya pay via M-Pesa, not card. Gate on current location.
+  if (normalizeCountry(input.country) === 'KE') throw new ApiError(422, 'stripe_not_available', 'Card checkout is not available while you are in Kenya — use M-Pesa')
 
   const price = PLAN_PRICES[input.planType].OTHER
   const subscription = await SubscriptionModel.create({
@@ -414,6 +417,12 @@ function getStripeTransactionId(session: Stripe.Checkout.Session) {
 
 function currencyForAccount(currency?: string | null) {
   return currency === 'KES' || currency === 'KSH' ? 'KSH' : 'USD'
+}
+
+/** Normalize a client-supplied country to an ISO alpha-2 code, or '' when unknown. */
+function normalizeCountry(value?: string | null) {
+  const code = (value ?? '').trim().toUpperCase()
+  return /^[A-Z]{2}$/.test(code) ? code : ''
 }
 
 async function markAccountPendingIfNoActiveAccess(account: { _id: Types.ObjectId; planTier?: string | null; subscriptionStatus?: string | null; subscriptionEndsAt?: Date | null }) {
