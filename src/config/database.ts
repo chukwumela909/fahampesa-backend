@@ -2,6 +2,7 @@ import mongoose from 'mongoose'
 import { env } from './env.js'
 import { ensureProductIdentityIndexes } from '../models/product.model.js'
 import { ensureBranchIdentityIndexes } from '../models/branch.model.js'
+import { IdempotencyKeyModel } from '../models/idempotency-key.model.js'
 
 export async function connectDatabase(uri = env.MONGODB_URI) {
   mongoose.set('strictQuery', true)
@@ -9,6 +10,9 @@ export async function connectDatabase(uri = env.MONGODB_URI) {
   // Runs in production too: legacy deployments carry a stale plain-unique index on
   // (businessAccountId, branchCode) that blocks creating a second branch without a code.
   await ensureBranchIdentityIndexes()
+  // The unique (businessAccountId, key) index is what collapses concurrent duplicate
+  // submissions, so it must exist before the first write — build it up front.
+  await IdempotencyKeyModel.createIndexes()
   if (env.NODE_ENV !== 'production') {
     await ensureProductIdentityIndexes()
   }

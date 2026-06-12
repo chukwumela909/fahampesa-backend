@@ -8,6 +8,7 @@ import type { AuthUser } from '../src/types/http.js'
 import type { FirebaseTokenVerifier } from '../src/config/firebase.js'
 import { BusinessAccountModel } from '../src/models/business-account.model.js'
 import { BusinessMembershipModel } from '../src/models/business-membership.model.js'
+import { IdempotencyKeyModel } from '../src/models/idempotency-key.model.js'
 import { UserModel } from '../src/models/user.model.js'
 
 class FakeVerifier implements FirebaseTokenVerifier {
@@ -46,6 +47,9 @@ beforeAll(async () => {
   process.env.MONGOMS_DOWNLOAD_DIR = path.join(process.cwd(), '.cache', 'mongodb-binaries')
   replSet = await MongoMemoryReplSet.create({ replSet: { count: 1 } })
   await mongoose.connect(replSet.getUri())
+  // The unique (businessAccountId, key) index is what collapses concurrent duplicate
+  // submissions; build it before any request runs.
+  await IdempotencyKeyModel.init()
 })
 
 afterEach(async () => {
@@ -176,6 +180,104 @@ describe('Phase 3 products and branch inventory', () => {
       })
     expect(oversellLikeAdjustment.status).toBe(409)
     expect(oversellLikeAdjustment.body.error.code).toBe('insufficient_stock')
+  })
+
+  it('flags a loss margin status when selling below cost and profit when above', async () => {
+    const onboarded = await onboardOwner()
+    const branchId = onboarded.body.data.branch.id
+
+    const loss = await createProduct(branchId, {
+      name: 'Clearance Mug',
+      inventory: { costPrice: 100, sellingPrice: 80 }
+    })
+    expect(loss.status).toBe(201)
+    expect(loss.body.data.inventory.profitMargin).toBe(-20)
+    expect(loss.body.data.inventory.marginStatus).toBe('loss')
+
+    const breakeven = await createProduct(branchId, {
+      name: 'Cost Recovery Mug',
+      inventory: { costPrice: 100, sellingPrice: 100 }
+    })
+    expect(breakeven.body.data.inventory.marginStatus).toBe('breakeven')
+
+    const profit = await createProduct(branchId, {
+      name: 'Premium Mug',
+      inventory: { costPrice: 100, sellingPrice: 150 }
+    })
+    expect(profit.body.data.inventory.profitMargin).toBe(50)
+    expect(profit.body.data.inventory.marginStatus).toBe('profit')
+  })
+
+  it('replays the same response and creates one product for a repeated Idempotency-Key', async () => {
+    const onboarded = await onboardOwner()
+    const branchId = onboarded.body.data.branch.id
+    const body = { name: 'Idempotent Soda', inventory: { sellingPrice: 50 } }
+    const key = 'create-soda-0001'
+
+    const first = await request(app)
+      .post(`/api/v1/branches/${branchId}/products`)
+      .set('Authorization', 'Bearer owner')
+      .set('Idempotency-Key', key)
+      .send(body)
+    expect(first.status).toBe(201)
+
+    const replay = await request(app)
+      .post(`/api/v1/branches/${branchId}/products`)
+      .set('Authorization', 'Bearer owner')
+      .set('Idempotency-Key', key)
+      .send(body)
+    expect(replay.status).toBe(201)
+    expect(replay.body.data.id).toBe(first.body.data.id)
+
+    const products = await request(app).get(`/api/v1/branches/${branchId}/products`).set('Authorization', 'Bearer owner')
+    expect(products.body.data).toHaveLength(1)
+  })
+
+  it('creates only one product when the same Idempotency-Key is submitted concurrently', async () => {
+    const onboarded = await onboardOwner()
+    const branchId = onboarded.body.data.branch.id
+    const body = { name: 'Rapid Click Bread', inventory: { sellingPrice: 40 } }
+    const key = 'rapid-click-bread-1'
+
+    const responses = await Promise.all(
+      Array.from({ length: 4 }, () =>
+        request(app)
+          .post(`/api/v1/branches/${branchId}/products`)
+          .set('Authorization', 'Bearer owner')
+          .set('Idempotency-Key', key)
+          .send(body)
+      )
+    )
+
+    expect(responses.some((response) => response.status === 201)).toBe(true)
+    for (const response of responses) {
+      // Losers of the unique-index race are rejected as in-progress or replay the first result.
+      expect([201, 409]).toContain(response.status)
+    }
+
+    const products = await request(app).get(`/api/v1/branches/${branchId}/products`).set('Authorization', 'Bearer owner')
+    expect(products.body.data).toHaveLength(1)
+  })
+
+  it('rejects reusing an Idempotency-Key for a materially different request', async () => {
+    const onboarded = await onboardOwner()
+    const branchId = onboarded.body.data.branch.id
+    const key = 'reused-key-0001'
+
+    const first = await request(app)
+      .post(`/api/v1/branches/${branchId}/products`)
+      .set('Authorization', 'Bearer owner')
+      .set('Idempotency-Key', key)
+      .send({ name: 'First Product', inventory: { sellingPrice: 10 } })
+    expect(first.status).toBe(201)
+
+    const reused = await request(app)
+      .post(`/api/v1/branches/${branchId}/products`)
+      .set('Authorization', 'Bearer owner')
+      .set('Idempotency-Key', key)
+      .send({ name: 'Different Product', inventory: { sellingPrice: 20 } })
+    expect(reused.status).toBe(422)
+    expect(reused.body.error.code).toBe('idempotency_key_reuse')
   })
 
   it('allows multiple products without optional barcode or SKU values', async () => {

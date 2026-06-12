@@ -311,7 +311,9 @@ export function serializeInventoryItem(inventory: { toObject(options?: unknown):
   } else {
     const costPrice = Number(value.costPrice ?? 0)
     const sellingPrice = Number(value.sellingPrice ?? 0)
-    value.profitMargin = sellingPrice - costPrice
+    const profitMargin = sellingPrice - costPrice
+    value.profitMargin = profitMargin
+    value.marginStatus = profitMargin < 0 ? 'loss' : profitMargin === 0 ? 'breakeven' : 'profit'
   }
   return value
 }

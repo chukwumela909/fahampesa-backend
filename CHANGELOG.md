@@ -4,6 +4,18 @@ All notable backend planning and implementation changes for FahamPesa will be tr
 
 This file follows a lightweight chronological format during active development.
 
+## 2026-06-12
+
+### Implemented
+
+- Added an explicit `marginStatus` (`'profit' | 'breakeven' | 'loss'`) field to serialized inventory items alongside `profitMargin`.
+  - Returned for owner/manager reads only (hidden from cashiers, like the other cost fields).
+  - Gives the product-creation UI a reliable signal to turn the margin card red on a loss instead of recomputing the sign client-side.
+- Implemented the `Idempotency-Key` guard from the LLD on `POST /api/v1/branches/:branchId/products`.
+  - First request stores a `pending` record keyed by `(businessAccountId, key)` (unique index); concurrent duplicate clicks lose the index race and receive `409 idempotency_request_in_progress`, so four rapid clicks create exactly one product.
+  - A finished request's response is stored and replayed verbatim on retry; reusing a key for a materially different body returns `422 idempotency_key_reuse`.
+  - The header is optional — requests without it are unaffected. Records expire via a 24h TTL index.
+
 ## 2026-06-08
 
 ### Implemented
