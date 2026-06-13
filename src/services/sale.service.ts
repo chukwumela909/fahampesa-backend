@@ -44,7 +44,9 @@ export async function listSales(context: RequestContext, branchId: Types.ObjectI
     businessAccountId: context.businessAccountId,
     branchId,
     isDeleted: false
-  }).sort({ createdAt: -1 })
+  })
+    .populate('createdBy', 'fullName')
+    .sort({ createdAt: -1 })
   return sales.map((sale) => serializeSale(sale, context))
 }
 
@@ -219,7 +221,7 @@ export async function getSale(context: RequestContext, branchId: Types.ObjectId,
     businessAccountId: context.businessAccountId,
     branchId,
     isDeleted: false
-  })
+  }).populate('createdBy', 'fullName')
   if (!sale) throw notFound('Sale not found')
   return serializeSale(sale, context)
 }
@@ -451,6 +453,19 @@ async function nextRefundNumber(businessAccountId: Types.ObjectId, session?: Cli
 
 export function serializeSale(sale: { toObject(options?: unknown): unknown }, context: RequestContext) {
   const value = normalizeMongo(sale.toObject({ versionKey: false })) as Record<string, unknown>
+
+  // Surface the name of the cashier who actually made the sale so receipts can
+  // attribute it correctly regardless of who is currently viewing. When createdBy
+  // is populated it is a { id, fullName } object; flatten it back to a plain id
+  // string and expose createdByName. Unpopulated paths (create/refund) leave
+  // createdBy as a string id and simply omit the name.
+  const creator = value.createdBy
+  if (creator && typeof creator === 'object') {
+    const populated = creator as Record<string, unknown>
+    value.createdByName = (populated.fullName as string | undefined) ?? null
+    value.createdBy = (populated.id as string | undefined) ?? null
+  }
+
   if (context.role === 'cashier') {
     delete value.totalCost
     delete value.profit

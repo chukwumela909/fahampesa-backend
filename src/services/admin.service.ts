@@ -133,6 +133,36 @@ export async function manualActivateSubscription(
   })
 }
 
+export async function deactivateSubscription(
+  context: RequestContext,
+  businessAccountId: Types.ObjectId,
+  input: { reason?: string },
+  requestMeta?: { ipAddress?: string; userAgent?: string }
+) {
+  requirePlatformAdmin(context)
+  return withTransaction(async (session) => {
+    const activeSession = session.inTransaction() ? session : undefined
+    const account = await BusinessAccountModel.findById(businessAccountId).session(activeSession ?? null)
+    if (!account) throw notFound('Business account not found')
+    // Downgrade to free immediately. Leave accountStatus untouched so the business
+    // keeps free-tier access — this is a plan revocation, not an account suspension.
+    account.planTier = 'free'
+    account.planType = null
+    account.subscriptionStatus = 'cancelled'
+    account.subscriptionEndsAt = null
+    await account.save(activeSession ? { session: activeSession } : undefined)
+
+    await SubscriptionModel.updateMany(
+      { businessAccountId, status: 'active' },
+      { $set: { status: 'cancelled' } },
+      activeSession ? { session: activeSession } : {}
+    )
+
+    await logAdminAction(context, businessAccountId, 'business.subscription_deactivated', 'business_account', businessAccountId, { reason: input.reason }, requestMeta, activeSession)
+    return normalizeMongo(account.toObject({ versionKey: false }))
+  })
+}
+
 export async function listPaymentEvents(context: RequestContext) {
   requirePlatformAdmin(context)
   const events = await PaymentEventModel.find({}).sort({ createdAt: -1 }).limit(100)

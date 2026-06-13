@@ -2,8 +2,9 @@ import type { Response } from 'express'
 import type { AppRequest } from '../types/http.js'
 import { asyncHandler } from '../utils/async-handler.js'
 import { objectIdSchema, toObjectId } from '../validators/common.js'
-import { adminBusinessQuerySchema, branchLimitOverrideSchema, manualActivateSchema, subscriptionExtendSchema } from '../validators/admin.validator.js'
+import { adminBusinessQuerySchema, branchLimitOverrideSchema, manualActivateSchema, subscriptionDeactivateSchema, subscriptionExtendSchema } from '../validators/admin.validator.js'
 import {
+  deactivateSubscription,
   extendSubscription,
   getBusinessDetail,
   listAuditLogs,
@@ -50,6 +51,11 @@ export const extend = asyncHandler(async (req: AppRequest, res: Response) => {
 export const manualActivate = asyncHandler(async (req: AppRequest, res: Response) => {
   const body = manualActivateSchema.parse(req.body)
   res.status(201).json({ data: await manualActivateSubscription(req.context!, businessAccountId(req), body, meta(req)) })
+})
+
+export const deactivate = asyncHandler(async (req: AppRequest, res: Response) => {
+  const body = subscriptionDeactivateSchema.parse(req.body)
+  res.json({ data: await deactivateSubscription(req.context!, businessAccountId(req), body, meta(req)) })
 })
 
 export const retryPayment = asyncHandler(async (req: AppRequest, res: Response) => {

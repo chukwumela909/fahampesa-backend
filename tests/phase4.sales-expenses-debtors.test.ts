@@ -164,6 +164,9 @@ describe('Phase 4 sales, expenses, and debtors', () => {
     const sales = await request(app).get(`/api/v1/branches/${branchId}/sales`).set('Authorization', 'Bearer cashier')
     expect(sales.status).toBe(200)
     expect(sales.body.data[0].totalCost).toBeUndefined()
+    // Receipts must attribute the sale to the cashier who made it, not the viewer.
+    expect(sales.body.data[0].createdByName).toBe('cashier User')
+    expect(typeof sales.body.data[0].createdBy).toBe('string')
   })
 
   it('keeps expenses branch scoped and manager-only', async () => {

@@ -320,10 +320,13 @@ async function localAuthUsers(input: { email?: string; firebaseUids?: string[] }
         lastSignInTime: user.lastLoginAt?.toISOString()
       },
       firestoreData: normalizeMongo(user.toObject({ versionKey: false })),
+      businessAccountId: account?._id.toString() ?? null,
       businessName: account?.businessName,
       businessType: account?.businessType,
       country: account?.country ?? null,
       billingRegion: account?.billingRegion ?? null,
+      accountStatus: account?.accountStatus ?? null,
+      planTier: account?.planTier ?? null,
       isSubscribed: account?.subscriptionStatus === 'active',
       subscriptionId: subscription?._id.toString() ?? null,
       subscriptionEndDate: account?.subscriptionEndsAt?.getTime() ?? null,

@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { auditLogs, branchLimit, businesses, businessDetail, extend, manualActivate, pause, payments, resume, retryPayment, revoke } from '../controllers/admin.controller.js'
+import { auditLogs, branchLimit, businesses, businessDetail, deactivate, extend, manualActivate, pause, payments, resume, retryPayment, revoke } from '../controllers/admin.controller.js'
 import { requirePlatformAdmin } from '../middleware/auth.js'
 
 export const adminRouter = Router()
@@ -13,6 +13,7 @@ adminRouter.post('/businesses/:businessAccountId/revoke', revoke)
 adminRouter.post('/businesses/:businessAccountId/branch-limit', branchLimit)
 adminRouter.post('/businesses/:businessAccountId/subscriptions/extend', extend)
 adminRouter.post('/businesses/:businessAccountId/subscriptions/manual-activate', manualActivate)
+adminRouter.post('/businesses/:businessAccountId/subscriptions/deactivate', deactivate)
 adminRouter.post('/payment-events/:eventId/retry', retryPayment)
 adminRouter.get('/audit-logs', auditLogs)
 adminRouter.get('/payments', payments)
