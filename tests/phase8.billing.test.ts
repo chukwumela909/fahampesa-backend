@@ -380,6 +380,37 @@ describe('Phase 8 production subscription billing', () => {
     expect(stripeInKenya.body.error.code).toBe('stripe_not_available')
   })
 
+  it('prices plans and offers providers strictly by current location, defaulting to USD', async () => {
+    await onboardOwner('owner', 'Kenya')
+
+    // In Kenya: KSH pricing, M-Pesa only.
+    const inKenya = await request(app)
+      .get('/api/v1/billing/plans?country=KE')
+      .set('Authorization', 'Bearer owner')
+    expect(inKenya.status).toBe(200)
+    expect(inKenya.body.data.region).toBe('KENYA')
+    expect(inKenya.body.data.currency).toBe('KSH')
+    expect(inKenya.body.data.provider).toBe('mpesa')
+    expect(inKenya.body.data.monthly).toEqual({ amount: 2000, currency: 'KSH' })
+    expect(inKenya.body.data.yearly).toEqual({ amount: 20000, currency: 'KSH' })
+
+    // Abroad (same Kenya-onboarded owner): USD pricing, card only, never M-Pesa.
+    const abroad = await request(app)
+      .get('/api/v1/billing/plans?country=US')
+      .set('Authorization', 'Bearer owner')
+    expect(abroad.status).toBe(200)
+    expect(abroad.body.data.region).toBe('OTHER')
+    expect(abroad.body.data.currency).toBe('USD')
+    expect(abroad.body.data.provider).toBe('stripe')
+
+    // Location unknown: fall back to USD / card, never M-Pesa.
+    const unknown = await request(app).get('/api/v1/billing/plans').set('Authorization', 'Bearer owner')
+    expect(unknown.status).toBe(200)
+    expect(unknown.body.data.region).toBe('OTHER')
+    expect(unknown.body.data.currency).toBe('USD')
+    expect(unknown.body.data.provider).toBe('stripe')
+  })
+
   it('keeps business sales payment methods record-only', async () => {
     const onboarded = await onboardOwner('owner', 'Kenya')
     const branchId = onboarded.body.data.branch.id

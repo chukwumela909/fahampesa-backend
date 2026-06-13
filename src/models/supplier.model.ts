@@ -9,6 +9,8 @@ const supplierSchema = new Schema(
     phone: { type: String, trim: true },
     email: { type: String, trim: true, lowercase: true },
     address: { type: String, trim: true },
+    categories: { type: [String], default: [] },
+    productsSupplied: { type: [String], default: [] },
     openingBalance: { type: Number, default: 0, min: 0 },
     paymentTerms: { type: String, trim: true },
     currentBalance: { type: Number, default: 0, min: 0 },

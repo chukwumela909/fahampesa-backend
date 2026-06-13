@@ -14,6 +14,8 @@ export interface SupplierInput {
   phone?: string
   email?: string
   address?: string
+  categories?: string[]
+  productsSupplied?: string[]
   openingBalance?: number
   paymentTerms?: string
   notes?: string

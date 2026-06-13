@@ -3,7 +3,7 @@ import type { AppRequest } from '../types/http.js'
 import { asyncHandler } from '../utils/async-handler.js'
 import { objectIdSchema, toObjectId } from '../validators/common.js'
 import { activityLogQuerySchema, acceptStaffInvitationSchema, createActivityLogSchema, createStaffInvitationSchema, createStaffSchema, staffInvitationListQuerySchema, staffListQuerySchema, updateStaffSchema, verifyTwoFactorSchema } from '../validators/staff.validator.js'
-import { activateStaff, createStaff, deactivateStaff, disableStaffTwoFactor, getStaff, listStaff, listStaffActivityLogs, setupStaffTwoFactor, updateStaff, verifyStaffTwoFactor, writeStaffActivity } from '../services/staff.service.js'
+import { activateStaff, createStaff, deactivateStaff, deleteStaff, disableStaffTwoFactor, getStaff, listStaff, listStaffActivityLogs, setupStaffTwoFactor, updateStaff, verifyStaffTwoFactor, writeStaffActivity } from '../services/staff.service.js'
 import { acceptStaffInvitation, cancelStaffInvitation, inviteStaff, listStaffInvitations, lookupStaffInvitation } from '../services/staff-invitation.service.js'
 import { ApiError } from '../utils/api-error.js'
 
@@ -52,7 +52,13 @@ export const update = asyncHandler(async (req: AppRequest, res: Response) => {
 })
 
 export const remove = asyncHandler(async (req: AppRequest, res: Response) => {
-  res.json({ data: await deactivateStaff(req.context!, staffId(req)) })
+  const id = staffId(req)
+  // Soft delete (deactivate) by default; permanent purge only when explicitly requested.
+  if (req.query.permanent === 'true') {
+    res.json({ data: await deleteStaff(req.context!, id) })
+    return
+  }
+  res.json({ data: await deactivateStaff(req.context!, id) })
 })
 
 export const activate = asyncHandler(async (req: AppRequest, res: Response) => {

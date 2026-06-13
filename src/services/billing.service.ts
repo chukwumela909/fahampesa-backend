@@ -45,16 +45,17 @@ export function setBillingProvidersForTest(providers: { mpesa?: MpesaProvider; s
   }
 }
 
-export function getPlans() {
+// Plans are priced and gated on the user's CURRENT location (IP-detected on the
+// client), so the "Get Pro" screen only ever shows one currency and one provider.
+// Kenya → KSH via M-Pesa; everywhere else (and unknown location) → USD via card.
+export function getPlans(country?: string | null) {
+  const region = regionForCountry(country)
   return {
-    monthly: {
-      kenya: PLAN_PRICES.monthly.KENYA,
-      other: PLAN_PRICES.monthly.OTHER
-    },
-    yearly: {
-      kenya: PLAN_PRICES.yearly.KENYA,
-      other: PLAN_PRICES.yearly.OTHER
-    }
+    region,
+    currency: PLAN_PRICES.monthly[region].currency,
+    provider: providerForRegion(region),
+    monthly: PLAN_PRICES.monthly[region],
+    yearly: PLAN_PRICES.yearly[region]
   }
 }
 
@@ -145,7 +146,7 @@ export async function startMpesaCheckout(context: RequestContext, input: { planT
   if (!account) throw notFound('Business account not found')
   // Provider is gated on the user's CURRENT location (IP-detected on the client),
   // not the onboarding region — M-Pesa is only available while in Kenya.
-  if (normalizeCountry(input.country) !== 'KE') throw new ApiError(422, 'mpesa_not_available', 'M-Pesa is only available when you are in Kenya')
+  if (regionForCountry(input.country) !== 'KENYA') throw new ApiError(422, 'mpesa_not_available', 'M-Pesa is only available when you are in Kenya')
 
   const price = PLAN_PRICES[input.planType].KENYA
   const normalizedPhoneNumber = normalizeKenyaPhoneNumber(input.phoneNumber)
@@ -193,7 +194,7 @@ export async function startStripeCheckout(context: RequestContext, input: { plan
   const account = await BusinessAccountModel.findById(context.businessAccountId)
   if (!account) throw notFound('Business account not found')
   // Users currently in Kenya pay via M-Pesa, not card. Gate on current location.
-  if (normalizeCountry(input.country) === 'KE') throw new ApiError(422, 'stripe_not_available', 'Card checkout is not available while you are in Kenya — use M-Pesa')
+  if (regionForCountry(input.country) === 'KENYA') throw new ApiError(422, 'stripe_not_available', 'Card checkout is not available while you are in Kenya — use M-Pesa')
 
   const price = PLAN_PRICES[input.planType].OTHER
   const subscription = await SubscriptionModel.create({
@@ -423,6 +424,20 @@ function currencyForAccount(currency?: string | null) {
 function normalizeCountry(value?: string | null) {
   const code = (value ?? '').trim().toUpperCase()
   return /^[A-Z]{2}$/.test(code) ? code : ''
+}
+
+/**
+ * Resolve the billing region from the user's CURRENT location (IP-detected on the
+ * client). Kenya pays in KSH via M-Pesa; everywhere else pays in USD via card.
+ * An unknown/unresolvable location falls back to OTHER (USD).
+ */
+function regionForCountry(country?: string | null): 'KENYA' | 'OTHER' {
+  return normalizeCountry(country) === 'KE' ? 'KENYA' : 'OTHER'
+}
+
+/** The only payment provider offered in each region. M-Pesa is Kenya-only. */
+function providerForRegion(region: 'KENYA' | 'OTHER') {
+  return region === 'KENYA' ? 'mpesa' : 'stripe'
 }
 
 async function markAccountPendingIfNoActiveAccess(account: { _id: Types.ObjectId; planTier?: string | null; subscriptionStatus?: string | null; subscriptionEndsAt?: Date | null }) {

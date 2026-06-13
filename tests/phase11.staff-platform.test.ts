@@ -92,6 +92,61 @@ describe('Staff, platform admin utilities, and notifications', () => {
     expect(setup.body.data.otpauthUrl).toContain('otpauth://totp/')
   })
 
+  it('permanently deletes staff (owner-only) and frees them to be re-added', async () => {
+    const onboarded = await onboardOwner()
+    const branchId = onboarded.body.data.branch.id
+
+    const created = await request(app)
+      .post('/api/v1/staff')
+      .set('Authorization', 'Bearer owner')
+      .send({ firebaseUid: 'manager_uid', email: 'manager@example.com', fullName: 'Manager User', role: 'manager', branchIds: [branchId] })
+    expect(created.status).toBe(201)
+    const staffId = created.body.data.id
+
+    // A manager (non-owner) cannot permanently delete
+    const forbidden = await request(app)
+      .delete(`/api/v1/staff/${staffId}?permanent=true`)
+      .set('Authorization', 'Bearer manager')
+    expect(forbidden.status).toBe(403)
+    expect(forbidden.body.error.code).toBe('owner_required')
+
+    // The business owner cannot be permanently deleted
+    const ownerRow = (await request(app).get('/api/v1/staff?status=active').set('Authorization', 'Bearer owner')).body.data.find(
+      (row: { role: string }) => row.role === 'owner'
+    )
+    const protectOwner = await request(app)
+      .delete(`/api/v1/staff/${ownerRow.id}?permanent=true`)
+      .set('Authorization', 'Bearer owner')
+    expect(protectOwner.status).toBe(409)
+    expect(protectOwner.body.error.code).toBe('cannot_delete_owner')
+
+    // Soft delete (default) keeps the record, just deactivates it
+    const softDeleted = await request(app).delete(`/api/v1/staff/${staffId}`).set('Authorization', 'Bearer owner')
+    expect(softDeleted.status).toBe(200)
+    expect(softDeleted.body.data.status).toBe('inactive')
+    const afterSoft = await request(app).get('/api/v1/staff').set('Authorization', 'Bearer owner')
+    expect(afterSoft.body.data).toHaveLength(2)
+
+    // Permanent delete purges the membership document
+    const purged = await request(app).delete(`/api/v1/staff/${staffId}?permanent=true`).set('Authorization', 'Bearer owner')
+    expect(purged.status).toBe(200)
+    expect(purged.body.data.deleted).toBe(true)
+
+    const afterPurge = await request(app).get('/api/v1/staff').set('Authorization', 'Bearer owner')
+    expect(afterPurge.body.data).toHaveLength(1)
+    expect(afterPurge.body.data.some((row: { id: string }) => row.id === staffId)).toBe(false)
+
+    const logs = await request(app).get('/api/v1/staff/logs').set('Authorization', 'Bearer owner')
+    expect(logs.body.data.some((log: { action: string }) => log.action === 'staff_permanently_deleted')).toBe(true)
+
+    // The person can now be added fresh again (no staff_already_exists)
+    const recreated = await request(app)
+      .post('/api/v1/staff')
+      .set('Authorization', 'Bearer owner')
+      .send({ firebaseUid: 'manager_uid', email: 'manager@example.com', fullName: 'Manager User', role: 'manager', branchIds: [branchId] })
+    expect(recreated.status).toBe(201)
+  })
+
   it('creates, lists, cancels, and accepts staff invitations with constrained dashboard access', async () => {
     const onboarded = await onboardOwner()
     const branchId = onboarded.body.data.branch.id

@@ -14,8 +14,11 @@ import {
   startStripeCheckout
 } from '../services/billing.service.js'
 
-export const plans = asyncHandler(async (_req: AppRequest, res: Response) => {
-  res.json({ data: getPlans() })
+export const plans = asyncHandler(async (req: AppRequest, res: Response) => {
+  // Current location detected on the client (IP geolocation), passed as ?country=KE.
+  // A missing/malformed value falls back to USD inside getPlans — don't 400 the screen.
+  const country = typeof req.query.country === 'string' ? req.query.country : undefined
+  res.json({ data: getPlans(country) })
 })
 
 export const subscription = asyncHandler(async (req: AppRequest, res: Response) => {

@@ -111,6 +111,52 @@ export async function activateStaff(context: RequestContext, staffId: Types.Obje
   return updateStaff(context, staffId, { status: 'active' })
 }
 
+/**
+ * Permanently remove a staff member's membership from the business. Unlike
+ * deactivateStaff (a reversible soft delete), this purges the BusinessMembership
+ * document so the person can be invited/added fresh again. The shared User record
+ * is left intact — it may back other businesses or the person's own login — and a
+ * final audit entry is recorded. Owner-only and irreversible.
+ */
+export async function deleteStaff(context: RequestContext, staffId: Types.ObjectId) {
+  requireManagerRole(context)
+  if (context.role !== 'owner') {
+    throw new ApiError(403, 'owner_required', 'Only the business owner can permanently delete staff members')
+  }
+  const membership = await BusinessMembershipModel.findOne({ _id: staffId, businessAccountId: context.businessAccountId })
+  if (!membership) throw notFound('Staff member not found')
+  if (membership.role === 'owner') {
+    throw new ApiError(409, 'cannot_delete_owner', 'The business owner cannot be removed')
+  }
+  if (membership.userId.equals(context.userId)) {
+    throw new ApiError(409, 'cannot_delete_self', 'You cannot remove your own staff record')
+  }
+
+  const user = await UserModel.findById(membership.userId)
+  const snapshot = {
+    fullName: user?.fullName,
+    email: user?.email,
+    role: membership.role,
+    employeeId: membership.employeeId
+  }
+
+  await membership.deleteOne()
+
+  await writeStaffActivity(context, {
+    action: 'staff_permanently_deleted',
+    description: `Staff member ${snapshot.fullName ?? snapshot.email ?? staffId.toString()} was permanently deleted`,
+    metadata: {
+      deletedStaffId: staffId.toString(),
+      role: snapshot.role,
+      email: snapshot.email,
+      employeeId: snapshot.employeeId
+    },
+    severity: 'warning'
+  })
+
+  return { id: staffId.toString(), deleted: true }
+}
+
 export async function setupStaffTwoFactor(context: RequestContext, staffId?: Types.ObjectId) {
   const targetId = staffId ?? context.membershipId
   if (!targetId) throw new ApiError(403, 'business_required', 'Business context required')
