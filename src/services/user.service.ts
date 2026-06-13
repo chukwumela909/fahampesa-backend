@@ -32,20 +32,31 @@ export async function findOrCreateUser(auth: AuthUser, session?: ClientSession) 
     return existing
   }
 
-  const [created] = await UserModel.create(
-    [
-      {
-        firebaseUid: auth.firebaseUid,
-        email: auth.email,
-        phone: auth.phone,
-        fullName: auth.name,
-        phoneVerified: Boolean(auth.phone),
-        lastLoginAt: new Date()
-      }
-    ],
-    { session }
-  )
-  return created
+  try {
+    const [created] = await UserModel.create(
+      [
+        {
+          firebaseUid: auth.firebaseUid,
+          email: auth.email,
+          phone: auth.phone,
+          fullName: auth.name,
+          phoneVerified: Boolean(auth.phone),
+          lastLoginAt: new Date()
+        }
+      ],
+      { session }
+    )
+    return created
+  } catch (error) {
+    // A concurrent request (e.g. the auth listener's /me racing an invite accept) may insert
+    // the same firebaseUid first. The unique index rejects the duplicate — fall back to the
+    // row the other request created instead of surfacing a spurious failure.
+    if ((error as { code?: number }).code === 11000) {
+      const raced = await UserModel.findOne({ firebaseUid: auth.firebaseUid }).session(session ?? null)
+      if (raced) return raced
+    }
+    throw error
+  }
 }
 
 export async function updateUserProfile(userId: Types.ObjectId, input: { fullName?: string; phone?: string }) {

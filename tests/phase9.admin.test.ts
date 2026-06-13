@@ -122,6 +122,26 @@ describe('Phase 9 super admin APIs', () => {
     expect(account.subscriptionEndsAt).toBeTruthy()
   })
 
+  it('one-click activates Pro from an empty body, defaulting to a monthly plan', async () => {
+    const onboarded = await onboardOwner()
+    const businessAccountId = onboarded.body.data.businessAccount.id
+
+    const grant = await request(app)
+      .post(`/api/v1/admin/businesses/${businessAccountId}/subscriptions/manual-activate`)
+      .set('Authorization', 'Bearer admin')
+      .send({})
+    expect(grant.status).toBe(201)
+    expect(grant.body.data.account.planTier).toBe('paid')
+    expect(grant.body.data.account.planType).toBe('monthly')
+    expect(grant.body.data.account.subscriptionStatus).toBe('active')
+    expect(grant.body.data.subscription.provider).toBe('manual')
+    expect(grant.body.data.subscription.amount).toBe(0)
+
+    const me = await request(app).get('/api/v1/me').set('Authorization', 'Bearer owner')
+    expect(me.body.data.planTier).toBe('paid')
+    expect(me.body.data.subscriptionStatus).toBe('active')
+  })
+
   it('lists payment events and marks failed event for retry', async () => {
     const onboarded = await onboardOwner()
     const businessAccountId = onboarded.body.data.businessAccount.id

@@ -17,7 +17,7 @@ import { mpesaCallback, stripeWebhook } from './controllers/webhook.controller.j
 import { adminRouter } from './routes/admin.routes.js'
 import { assetRouter } from './routes/asset.routes.js'
 import { createPublicPlatformRouter, notificationRouter, platformAdminRouter } from './routes/platform.routes.js'
-import { staffRouter } from './routes/staff.routes.js'
+import { publicStaffRouter, staffRouter } from './routes/staff.routes.js'
 import type { ProductImageStorageUploader } from './services/asset.service.js'
 
 export interface CreateAppOptions {
@@ -47,6 +47,7 @@ export function createApp(options: CreateAppOptions = {}) {
   app.post('/api/mpesa/callback', mpesaCallback)
   app.use('/api/v1', createPublicPlatformRouter(verifier))
   app.use('/api/v1', publicAuthRouter)
+  app.use('/api/v1/staff', publicStaffRouter)
   app.use('/api/v1', authMiddleware(verifier))
   app.use('/api/v1', authRouter)
   app.use('/api/v1/admin', adminRouter)

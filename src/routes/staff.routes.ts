@@ -2,11 +2,16 @@ import { Router } from 'express'
 import { acceptInvitation, activate, cancelInvitation, create, createInvitation, createLog, disableTwoFactor, get, list, listInvitations, logs, lookupInvitation, remove, setupTwoFactor, update, verifyTwoFactor } from '../controllers/staff.controller.js'
 import { requireBusinessContext, requireWriteAccess } from '../middleware/auth.js'
 
+// Public, token-gated lookup so an invitee can see what they were invited to
+// (and we can pre-fill their email) BEFORE they have an account or are signed in.
+// Mounted ahead of the auth middleware in app.ts.
+export const publicStaffRouter = Router()
+publicStaffRouter.get('/invitations/lookup', lookupInvitation)
+
 export const staffRouter = Router()
 
-// Invitation accept/lookup only need an authenticated user (no business context yet)
+// Accept needs an authenticated user but no business context yet (they aren't a member until accept).
 staffRouter.post('/invitations/accept', acceptInvitation)
-staffRouter.get('/invitations/lookup', lookupInvitation)
 staffRouter.use(requireBusinessContext)
 staffRouter.get('/invitations', listInvitations)
 staffRouter.post('/invitations', requireWriteAccess, createInvitation)

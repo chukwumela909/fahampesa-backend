@@ -9,8 +9,10 @@ export const subscriptionExtendSchema = z.object({
   reason: z.string().trim().optional()
 })
 
+// One-click Pro grant: an empty body activates a monthly plan. planType/days/reason
+// are all optional overrides so the admin can grant a year or a custom window.
 export const manualActivateSchema = z.object({
-  planType: z.enum(['monthly', 'yearly']),
+  planType: z.enum(['monthly', 'yearly']).default('monthly'),
   days: z.number().int().positive().optional(),
   reason: z.string().trim().optional()
 })

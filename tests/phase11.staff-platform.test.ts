@@ -179,6 +179,12 @@ describe('Staff, platform admin utilities, and notifications', () => {
 
     const token = tokenFromInviteUrl(created.body.data.inviteUrl)
 
+    // Lookup is public (token-gated): a brand-new invitee with no account / no auth can resolve it
+    const publicLookup = await request(app).get(`/api/v1/staff/invitations/lookup?token=${encodeURIComponent(token)}`)
+    expect(publicLookup.status).toBe(200)
+    expect(publicLookup.body.data.email).toBe('invitee@example.com')
+    expect(publicLookup.body.data.tokenHash).toBeUndefined()
+
     // The invitee can look up the invitation context by token before accepting
     const lookup = await request(app)
       .get(`/api/v1/staff/invitations/lookup?token=${encodeURIComponent(token)}`)
