@@ -9,6 +9,7 @@ import type { FirebaseTokenVerifier } from '../src/config/firebase.js'
 import { BusinessAccountModel } from '../src/models/business-account.model.js'
 import { BusinessMembershipModel } from '../src/models/business-membership.model.js'
 import { BranchModel } from '../src/models/branch.model.js'
+import { ExpenseModel } from '../src/models/expense.model.js'
 import { OnboardingStateModel } from '../src/models/onboarding-state.model.js'
 import { SettingsModel } from '../src/models/settings.model.js'
 import { StaffInvitationModel } from '../src/models/staff-invitation.model.js'
@@ -377,6 +378,61 @@ describe('Phase 1 auth, onboarding, subscription access, and branches', () => {
       .set('Authorization', 'Bearer owner')
     expect(enabled.status).toBe(200)
     expect(enabled.body.data.status).toBe('active')
+  })
+
+  it('permanently deletes a branch and cascades its records', async () => {
+    const onboarded = await onboardOwner()
+    await BusinessAccountModel.updateOne({}, { $set: { planTier: 'paid', subscriptionStatus: 'active', subscriptionEndsAt: futureDate() } })
+
+    const second = await createBranch('Second Branch', 'BR002')
+    expect(second.status).toBe(201)
+
+    const businessAccountId = onboarded.body.data.businessAccount.id
+    const mainBranchId = onboarded.body.data.branch.id
+    const secondBranchId = second.body.data.id
+    const ownerUser = await UserModel.findOne({ firebaseUid: 'owner_uid' }).orFail()
+
+    await ExpenseModel.create({
+      businessAccountId,
+      branchId: secondBranchId,
+      amount: 500,
+      category: 'rent',
+      paymentMethod: 'cash',
+      date: new Date(),
+      createdBy: ownerUser._id
+    })
+
+    const staffUser = await UserModel.create({ firebaseUid: 'staff_uid', email: 'staff@example.com', fullName: 'Staff User' })
+    await BusinessMembershipModel.create({
+      businessAccountId,
+      userId: staffUser._id,
+      role: 'manager',
+      assignedBranchIds: [mainBranchId, secondBranchId],
+      permissions: [],
+      createdBy: ownerUser._id
+    })
+
+    const deleted = await request(app).delete(`/api/v1/branches/${secondBranchId}`).set('Authorization', 'Bearer owner')
+    expect(deleted.status).toBe(200)
+    expect(deleted.body.data.id).toBe(secondBranchId)
+    expect(deleted.body.data.deletedCounts.expenses).toBe(1)
+
+    expect(await BranchModel.findById(secondBranchId)).toBeNull()
+    expect(await ExpenseModel.countDocuments({ branchId: secondBranchId })).toBe(0)
+
+    const membership = await BusinessMembershipModel.findOne({ userId: staffUser._id }).orFail()
+    expect(membership.assignedBranchIds.map(String)).toEqual([mainBranchId])
+  })
+
+  it('refuses to permanently delete the only active branch', async () => {
+    const onboarded = await onboardOwner()
+
+    const response = await request(app).delete(`/api/v1/branches/${onboarded.body.data.branch.id}`).set('Authorization', 'Bearer owner')
+    expect(response.status).toBe(409)
+    expect(response.body.error.code).toBe('last_active_branch')
+
+    // The rejected delete leaves the branch intact.
+    expect(await BranchModel.findById(onboarded.body.data.branch.id)).not.toBeNull()
   })
 })
 

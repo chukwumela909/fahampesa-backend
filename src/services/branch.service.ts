@@ -2,6 +2,20 @@ import type { ClientSession, Types } from 'mongoose'
 import { BranchModel } from '../models/branch.model.js'
 import { BusinessAccountModel } from '../models/business-account.model.js'
 import { BusinessMembershipModel } from '../models/business-membership.model.js'
+import { StaffInvitationModel } from '../models/staff-invitation.model.js'
+import { InventoryItemModel } from '../models/inventory-item.model.js'
+import { StockMovementModel } from '../models/stock-movement.model.js'
+import { SaleModel } from '../models/sale.model.js'
+import { RefundModel } from '../models/refund.model.js'
+import { ExpenseModel } from '../models/expense.model.js'
+import { DebtorModel } from '../models/debtor.model.js'
+import { DebtorPaymentModel } from '../models/debtor-payment.model.js'
+import { SupplierModel } from '../models/supplier.model.js'
+import { SupplierPaymentModel } from '../models/supplier-payment.model.js'
+import { SupplierLedgerEntryModel } from '../models/supplier-ledger-entry.model.js'
+import { PurchaseOrderModel } from '../models/purchase-order.model.js'
+import { AlertModel } from '../models/alert.model.js'
+import { StockTransferModel } from '../models/stock-transfer.model.js'
 import { withTransaction } from '../config/database.js'
 import { ApiError, notFound } from '../utils/api-error.js'
 import { getEffectiveBranchLimit } from './account.service.js'
@@ -240,6 +254,103 @@ export async function enableBranch(context: RequestContext, branchId: Types.Obje
     )
 
     return branch
+  })
+}
+
+export async function deleteBranch(context: RequestContext, branchId: Types.ObjectId, requestMeta?: { ipAddress?: string; userAgent?: string }) {
+  requireBusinessContext(context)
+  if (context.role !== 'owner') throw new ApiError(403, 'owner_required', 'Only owners can delete branches')
+
+  return withTransaction(async (session) => {
+    const activeSession = session.inTransaction() ? session : undefined
+    const sessionArg = activeSession ?? null
+    const opts = activeSession ? { session: activeSession } : {}
+
+    // Delete regardless of status (an already-disabled branch can be purged too).
+    const branch = await BranchModel.findOne({ _id: branchId, businessAccountId: context.businessAccountId }).session(sessionArg)
+    if (!branch) throw notFound('Branch not found')
+
+    // A business must always keep at least one active branch. Deleting a disabled
+    // branch never removes an active one, so only enforce the guard for active ones.
+    if (branch.status !== 'disabled') {
+      const otherActiveBranches = await BranchModel.countDocuments({
+        businessAccountId: context.businessAccountId,
+        status: { $ne: 'disabled' },
+        _id: { $ne: branchId }
+      }).session(sessionArg)
+      if (otherActiveBranches === 0) {
+        throw new ApiError(409, 'last_active_branch', 'Cannot permanently delete the only active branch; a business must have at least one active branch')
+      }
+    }
+
+    // Cascade-delete every branch-scoped record. Run sequentially: a single
+    // ClientSession cannot service concurrent operations inside a transaction.
+    const branchScope = { businessAccountId: context.businessAccountId, branchId }
+    const inventoryItems = await InventoryItemModel.deleteMany(branchScope, opts)
+    const stockMovements = await StockMovementModel.deleteMany(branchScope, opts)
+    const sales = await SaleModel.deleteMany(branchScope, opts)
+    const refunds = await RefundModel.deleteMany(branchScope, opts)
+    const expenses = await ExpenseModel.deleteMany(branchScope, opts)
+    const debtors = await DebtorModel.deleteMany(branchScope, opts)
+    const debtorPayments = await DebtorPaymentModel.deleteMany(branchScope, opts)
+    const suppliers = await SupplierModel.deleteMany(branchScope, opts)
+    const supplierPayments = await SupplierPaymentModel.deleteMany(branchScope, opts)
+    const supplierLedgerEntries = await SupplierLedgerEntryModel.deleteMany(branchScope, opts)
+    const purchaseOrders = await PurchaseOrderModel.deleteMany(branchScope, opts)
+    const alerts = await AlertModel.deleteMany(branchScope, opts)
+    const stockTransfers = await StockTransferModel.deleteMany(
+      { businessAccountId: context.businessAccountId, $or: [{ fromBranchId: branchId }, { toBranchId: branchId }] },
+      opts
+    )
+
+    // Strip the branch from staff assignments and pending invitations.
+    await BusinessMembershipModel.updateMany(
+      { businessAccountId: context.businessAccountId, assignedBranchIds: branchId },
+      { $pull: { assignedBranchIds: branchId } },
+      opts
+    )
+    await StaffInvitationModel.updateMany(
+      { businessAccountId: context.businessAccountId, assignedBranchIds: branchId },
+      { $pull: { assignedBranchIds: branchId } },
+      opts
+    )
+
+    await BranchModel.deleteOne({ _id: branchId, businessAccountId: context.businessAccountId }, opts)
+
+    const deletedCounts = {
+      inventoryItems: inventoryItems.deletedCount,
+      stockMovements: stockMovements.deletedCount,
+      sales: sales.deletedCount,
+      refunds: refunds.deletedCount,
+      expenses: expenses.deletedCount,
+      debtors: debtors.deletedCount,
+      debtorPayments: debtorPayments.deletedCount,
+      suppliers: suppliers.deletedCount,
+      supplierPayments: supplierPayments.deletedCount,
+      supplierLedgerEntries: supplierLedgerEntries.deletedCount,
+      purchaseOrders: purchaseOrders.deletedCount,
+      alerts: alerts.deletedCount,
+      stockTransfers: stockTransfers.deletedCount
+    }
+
+    await writeAuditLog(
+      {
+        scope: 'business',
+        businessAccountId: context.businessAccountId,
+        actorUserId: context.userId,
+        actorRole: context.role,
+        action: 'branch.deleted',
+        targetType: 'branch',
+        targetId: branch._id,
+        branchId: branch._id,
+        metadata: { branchName: branch.name, branchType: branch.branchType, deletedCounts },
+        ipAddress: requestMeta?.ipAddress,
+        userAgent: requestMeta?.userAgent
+      },
+      activeSession
+    )
+
+    return { id: branch._id.toString(), name: branch.name, deletedCounts }
   })
 }
 

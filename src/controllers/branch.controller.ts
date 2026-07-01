@@ -4,7 +4,7 @@ import { asyncHandler } from '../utils/async-handler.js'
 import { serializeDocument } from '../utils/serialize.js'
 import { objectIdSchema, toObjectId } from '../validators/common.js'
 import { createBranchSchema, updateBranchSchema } from '../validators/branch.validator.js'
-import { createBranch, disableBranch, enableBranch, getBranchForContext, listBranches, updateBranch } from '../services/branch.service.js'
+import { createBranch, deleteBranch, disableBranch, enableBranch, getBranchForContext, listBranches, updateBranch } from '../services/branch.service.js'
 
 export const list = asyncHandler(async (req: AppRequest, res: Response) => {
   const branches = await listBranches(req.context!)
@@ -52,4 +52,13 @@ export const enable = asyncHandler(async (req: AppRequest, res: Response) => {
     userAgent: req.header('user-agent')
   })
   res.json({ data: serializeDocument(branch) })
+})
+
+export const remove = asyncHandler(async (req: AppRequest, res: Response) => {
+  const branchId = toObjectId(objectIdSchema.parse(req.params.branchId))
+  const result = await deleteBranch(req.context!, branchId, {
+    ipAddress: req.ip,
+    userAgent: req.header('user-agent')
+  })
+  res.json({ data: result })
 })

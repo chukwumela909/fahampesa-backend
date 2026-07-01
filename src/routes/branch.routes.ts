@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { create, disable, enable, get, list, update } from '../controllers/branch.controller.js'
+import { create, disable, enable, get, list, remove, update } from '../controllers/branch.controller.js'
 import { requireBusinessContext, requireRecentAuth, requireWriteAccess } from '../middleware/auth.js'
 import { inventoryRouter } from './inventory.routes.js'
 import { productRouter } from './product.routes.js'
@@ -28,3 +28,4 @@ branchRouter.get('/:branchId', get)
 branchRouter.patch('/:branchId', requireWriteAccess, update)
 branchRouter.post('/:branchId/disable', requireWriteAccess, requireRecentAuth(), disable)
 branchRouter.post('/:branchId/enable', requireWriteAccess, enable)
+branchRouter.delete('/:branchId', requireWriteAccess, remove)

@@ -49,7 +49,15 @@ function pickSafeBusinessProfile(profile: Record<string, unknown>) {
     businessName: profile.businessName,
     businessType: profile.businessType,
     country: profile.country,
-    currency: profile.currency
+    currency: profile.currency,
+    // Operational fields the POS/receipts need at the till. Cashiers ring up sales,
+    // so they must receive the configured VAT rate (and low-stock threshold / contact
+    // details for receipts) — otherwise the POS falls back to a built-in default and
+    // the tax rate set in Settings never reflects for cashier-run sales.
+    taxRate: profile.taxRate,
+    lowStockThreshold: profile.lowStockThreshold,
+    businessPhone: profile.businessPhone,
+    businessAddress: profile.businessAddress
   }
 }
 

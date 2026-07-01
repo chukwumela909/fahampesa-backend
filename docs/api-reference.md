@@ -157,8 +157,9 @@ Write routes also require account write access.
 | `GET` | `/branches/:branchId/dashboard` | Branch dashboard summary. |
 | `GET` | `/branches/:branchId` | Get branch by ID. |
 | `PATCH` | `/branches/:branchId` | Update branch. |
-| `POST` | `/branches/:branchId/disable` | Disable branch; requires recent Firebase auth. |
+| `POST` | `/branches/:branchId/disable` | Disable branch (soft delete); requires recent Firebase auth. |
 | `POST` | `/branches/:branchId/enable` | Re-enable branch. |
+| `DELETE` | `/branches/:branchId` | **Permanently** delete a branch and cascade-delete all its records (inventory, stock movements, sales, refunds, expenses, debtors + payments, suppliers + payments/ledger, purchase orders, alerts, and stock transfers to/from it); also strips it from staff assignments and pending invitations. Owner-only and irreversible. Rejected with `409 last_active_branch` if it is the only active branch. |
 
 ### `POST /branches`
 
