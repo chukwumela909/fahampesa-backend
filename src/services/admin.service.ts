@@ -106,24 +106,41 @@ export async function manualActivateSubscription(
     account.subscriptionEndsAt = endDate
     await account.save(activeSession ? { session: activeSession } : undefined)
 
-    const [subscription] = await SubscriptionModel.create(
-      [
-        {
-          businessAccountId,
-          userId: context.userId,
-          provider: 'manual',
-          planType: input.planType,
-          status: 'active',
-          amount: 0,
-          currency: account.currency === 'KES' ? 'KSH' : 'USD',
-          transactionId: `manual-${Date.now()}`,
-          startDate,
-          endDate,
-          receiptNumber: `MANUAL-${businessAccountId.toString().slice(-8).toUpperCase()}`
-        }
-      ],
-      activeSession ? { session: activeSession } : {}
-    )
+    // Idempotent: reuse the account's existing subscription row instead of always inserting a new
+    // one (which made a manually-added subscription show up twice). Update the most recent row in
+    // place and expire any others so exactly one active subscription remains; create only if none.
+    const subscriptionFields = {
+      businessAccountId,
+      userId: context.userId,
+      provider: 'manual',
+      planType: input.planType,
+      status: 'active' as const,
+      amount: 0,
+      currency: account.currency === 'KES' ? 'KSH' : 'USD',
+      transactionId: `manual-${Date.now()}`,
+      startDate,
+      endDate,
+      receiptNumber: `MANUAL-${businessAccountId.toString().slice(-8).toUpperCase()}`
+    }
+    const existing = await SubscriptionModel.find({ businessAccountId })
+      .sort({ createdAt: -1 })
+      .session(activeSession ?? null)
+    let subscription
+    if (existing.length > 0) {
+      subscription = existing[0]
+      subscription.set(subscriptionFields)
+      await subscription.save(activeSession ? { session: activeSession } : undefined)
+      const staleIds = existing.slice(1).map((s) => s._id)
+      if (staleIds.length > 0) {
+        await SubscriptionModel.updateMany(
+          { _id: { $in: staleIds } },
+          { $set: { status: 'expired' } },
+          activeSession ? { session: activeSession } : {}
+        )
+      }
+    } else {
+      ;[subscription] = await SubscriptionModel.create([subscriptionFields], activeSession ? { session: activeSession } : {})
+    }
 
     await logAdminAction(context, businessAccountId, 'business.subscription_manual_activated', 'subscription', subscription._id, { planType: input.planType, days, reason: input.reason }, requestMeta, activeSession)
     return {
