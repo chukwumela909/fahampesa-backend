@@ -20,5 +20,10 @@ export const createDebtorPaymentSchema = z.object({
   reference: z.string().trim().optional()
 })
 
+export const addDebtorPurchaseSchema = z.object({
+  amount: z.number().positive(),
+  dueDate: z.coerce.date().nullable().optional()
+})
+
 export type CreateDebtorBody = z.infer<typeof createDebtorSchema>
 export type CreateDebtorPaymentBody = z.infer<typeof createDebtorPaymentSchema>

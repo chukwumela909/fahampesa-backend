@@ -12,6 +12,7 @@ import { transferRouter } from './routes/transfer.routes.js'
 import { reportRouter } from './routes/report.routes.js'
 import { settingsRouter } from './routes/settings.routes.js'
 import { billingRouter } from './routes/billing.routes.js'
+import { usageRouter } from './routes/usage.routes.js'
 import { webhookRouter } from './routes/webhook.routes.js'
 import { mpesaCallback, stripeWebhook } from './controllers/webhook.controller.js'
 import { adminRouter } from './routes/admin.routes.js'
@@ -54,6 +55,7 @@ export function createApp(options: CreateAppOptions = {}) {
   app.use('/api/v1/admin', platformAdminRouter)
   app.use('/api/v1/assets', assetRouter)
   app.use('/api/v1/billing', billingRouter)
+  app.use('/api/v1/usage', usageRouter)
   app.use('/api/v1/branches', branchRouter)
   app.use('/api/v1/reports', reportRouter)
   app.use('/api/v1/settings', settingsRouter)

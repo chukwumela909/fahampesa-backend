@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { objectIdSchema } from './common.js'
 
 const openingHoursSchema = z.object({
   dayOfWeek: z.enum(['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY']),
@@ -52,7 +53,9 @@ export const createBranchSchema = z.object({
 })
 
 export const updateBranchSchema = createBranchSchema.partial().extend({
-  status: z.enum(['active', 'inactive', 'under_maintenance', 'temporarily_closed']).optional()
+  status: z.enum(['active', 'inactive', 'under_maintenance', 'temporarily_closed']).optional(),
+  // Assign (or clear, with null) the branch manager
+  managerUserId: objectIdSchema.nullable().optional()
 })
 
 export type CreateBranchBody = z.infer<typeof createBranchSchema>

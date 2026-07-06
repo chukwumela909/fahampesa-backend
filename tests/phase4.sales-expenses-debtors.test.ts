@@ -254,6 +254,107 @@ describe('Phase 4 sales, expenses, and debtors', () => {
     expect(payment.body.data.debtor.currentDebt).toBe(700)
     expect(payment.body.data.payment.outstandingBalance).toBe(700)
   })
+
+  it('adds manual debt to an existing debtor and blocks delete until the balance is clear', async () => {
+    const onboarded = await onboardOwner()
+    const branchId = onboarded.body.data.branch.id
+
+    const debtor = await request(app)
+      .post(`/api/v1/branches/${branchId}/debtors`)
+      .set('Authorization', 'Bearer owner')
+      .send({ name: 'Brian Customer', phone: '+254700000002', creditLimit: 5000 })
+    expect(debtor.status).toBe(201)
+    const debtorId = debtor.body.data.id
+
+    // Manual purchase increases the balance and totals
+    const purchase = await request(app)
+      .post(`/api/v1/branches/${branchId}/debtors/${debtorId}/purchases`)
+      .set('Authorization', 'Bearer owner')
+      .send({ amount: 1500 })
+    expect(purchase.status).toBe(201)
+    expect(purchase.body.data.currentDebt).toBe(1500)
+    expect(purchase.body.data.totalPurchases).toBe(1500)
+
+    // Credit-limit guard blocks a purchase that would exceed the limit
+    const overLimit = await request(app)
+      .post(`/api/v1/branches/${branchId}/debtors/${debtorId}/purchases`)
+      .set('Authorization', 'Bearer owner')
+      .send({ amount: 4000 })
+    expect(overLimit.status).toBe(409)
+    expect(overLimit.body.error.code).toBe('credit_limit_exceeded')
+
+    // Cannot delete a debtor who still owes money
+    const blockedDelete = await request(app)
+      .delete(`/api/v1/branches/${branchId}/debtors/${debtorId}`)
+      .set('Authorization', 'Bearer owner')
+    expect(blockedDelete.status).toBe(409)
+    expect(blockedDelete.body.error.code).toBe('debtor_has_outstanding_debt')
+
+    // Settle the balance, then the debtor can be deleted (soft delete → gone from the active list)
+    const payoff = await request(app)
+      .post(`/api/v1/branches/${branchId}/debtors/${debtorId}/payments`)
+      .set('Authorization', 'Bearer owner')
+      .send({ amount: 1500, paymentMethod: 'cash' })
+    expect(payoff.status).toBe(201)
+    expect(payoff.body.data.debtor.currentDebt).toBe(0)
+
+    const okDelete = await request(app)
+      .delete(`/api/v1/branches/${branchId}/debtors/${debtorId}`)
+      .set('Authorization', 'Bearer owner')
+    expect(okDelete.status).toBe(200)
+
+    const list = await request(app).get(`/api/v1/branches/${branchId}/debtors`).set('Authorization', 'Bearer owner')
+    expect(list.status).toBe(200)
+    expect(list.body.data.some((d: { id: string }) => d.id === debtorId)).toBe(false)
+  })
+
+  it('collapses duplicate sale submissions that share an Idempotency-Key', async () => {
+    const onboarded = await onboardOwner()
+    const branchId = onboarded.body.data.branch.id
+    const product = await createProduct(branchId, 'Soda 500ml', 'SODA-500', 10, 100)
+    const productId = product.body.data.id
+
+    const salePayload = { items: [{ productId, quantity: 2, unitPrice: 100 }], paymentMethod: 'cash' }
+    const key = 'sale-idempotency-key-0001'
+
+    const first = await request(app)
+      .post(`/api/v1/branches/${branchId}/sales`)
+      .set('Authorization', 'Bearer owner')
+      .set('Idempotency-Key', key)
+      .send(salePayload)
+    expect(first.status).toBe(201)
+
+    // A retried POST (dropped response, offline drain, double-tap) returns the SAME sale, not a new one
+    const replay = await request(app)
+      .post(`/api/v1/branches/${branchId}/sales`)
+      .set('Authorization', 'Bearer owner')
+      .set('Idempotency-Key', key)
+      .send(salePayload)
+    expect(replay.status).toBe(201)
+    expect(replay.body.data.id).toBe(first.body.data.id)
+
+    // Exactly one sale exists and stock was deducted once (10 - 2 = 8)
+    const sales = await request(app).get(`/api/v1/branches/${branchId}/sales`).set('Authorization', 'Bearer owner')
+    expect(sales.body.data).toHaveLength(1)
+    const inventory = await request(app).get(`/api/v1/branches/${branchId}/inventory`).set('Authorization', 'Bearer owner')
+    expect(inventory.body.data[0].inventory.quantity).toBe(8)
+  })
+
+  it('reports business usage counts for plan-limit enforcement', async () => {
+    const onboarded = await onboardOwner()
+    const branchId = onboarded.body.data.branch.id
+    await createProduct(branchId, 'Usage A', 'USE-A', 5, 50)
+    await createProduct(branchId, 'Usage B', 'USE-B', 5, 50)
+
+    const usage = await request(app).get('/api/v1/usage').set('Authorization', 'Bearer owner')
+    expect(usage.status).toBe(200)
+    expect(usage.body.data.products).toBe(2)
+    expect(usage.body.data.branches).toBe(1)
+    expect(usage.body.data.staff).toBe(0)
+    expect(usage.body.data.suppliers).toBe(0)
+    expect(usage.body.data.debtors).toBe(0)
+    expect(usage.body.data.dailySales).toBe(0)
+  })
 })
 
 function onboardOwner() {

@@ -4,7 +4,6 @@ import { asyncHandler } from '../utils/async-handler.js'
 import { objectIdSchema, toObjectId } from '../validators/common.js'
 import { mpesaCheckoutSchema, stripeCheckoutSchema } from '../validators/billing.validator.js'
 import {
-  activateMonthlySubscription,
   getBillingHistory,
   getCheckoutStatus,
   getCurrentSubscription,
@@ -40,14 +39,6 @@ export const checkoutStatus = asyncHandler(async (req: AppRequest, res: Response
   res.json({ data: await getCheckoutStatus(req.context!, subscriptionId) })
 })
 
-export const activateMonthly = asyncHandler(async (req: AppRequest, res: Response) => {
-  res.status(201).json({
-    data: await activateMonthlySubscription(req.context!, {
-      ipAddress: req.ip,
-      userAgent: req.header('user-agent')
-    })
-  })
-})
 
 export const mpesaStkPush = asyncHandler(async (req: AppRequest, res: Response) => {
   const body = mpesaCheckoutSchema.parse(req.body)

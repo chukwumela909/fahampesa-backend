@@ -35,6 +35,24 @@ export function isBusinessWritable(account: {
   return account.subscriptionEndsAt.getTime() > Date.now()
 }
 
+// A subscription can lapse (end date passes) without any process flipping its stored status,
+// so read paths must derive the effective status. A 'paid'/'active' account whose end date has
+// passed reports 'expired' — otherwise clients show "subscribed" while every write is 402'd.
+export function effectiveSubscriptionStatus(account: {
+  planTier: 'free' | 'paid'
+  subscriptionStatus: 'none' | 'pending' | 'active' | 'expired' | 'failed' | 'cancelled'
+  subscriptionEndsAt?: Date | null
+}) {
+  if (
+    account.planTier === 'paid' &&
+    account.subscriptionStatus === 'active' &&
+    (!account.subscriptionEndsAt || account.subscriptionEndsAt.getTime() <= Date.now())
+  ) {
+    return 'expired' as const
+  }
+  return account.subscriptionStatus
+}
+
 export async function resolveActiveMembership(userId: Types.ObjectId) {
   const membership = await BusinessMembershipModel.findOne({ userId, status: 'active' }).sort({ createdAt: 1 })
   if (!membership) return null

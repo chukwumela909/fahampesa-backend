@@ -75,7 +75,8 @@ class FakeStripeProvider implements StripeProvider {
 
 const fakeUsers: Record<string, AuthUser> = {
   owner: { firebaseUid: 'owner_uid', email: 'owner@example.com', name: 'Owner User' },
-  ownerOther: { firebaseUid: 'owner_other_uid', email: 'owner.other@example.com', name: 'Owner Other' }
+  ownerOther: { firebaseUid: 'owner_other_uid', email: 'owner.other@example.com', name: 'Owner Other' },
+  admin: { firebaseUid: 'admin_uid', email: 'admin@example.com', name: 'Admin User', platformRole: 'admin' }
 }
 
 const STRIPE_WEBHOOK_SECRET = 'whsec_test_secret'
@@ -222,8 +223,9 @@ describe('Phase 8 production subscription billing', () => {
     expect(subscription.transactionId).toBe(`MPESA-${checkout.body.data.subscription.checkoutRequestId}`)
   })
 
-  it('activates the current owner on a monthly plan and unlocks paid access', async () => {
-    await onboardOwner('owner', 'Kenya')
+  it('unlocks paid access when a platform admin manually activates a monthly plan', async () => {
+    const onboarded = await onboardOwner('owner', 'Kenya')
+    const businessAccountId = onboarded.body.data.businessAccount.id
 
     const blockedBranch = await request(app)
       .post('/api/v1/branches')
@@ -232,10 +234,11 @@ describe('Phase 8 production subscription billing', () => {
     expect(blockedBranch.status).toBe(403)
     expect(blockedBranch.body.error.code).toBe('branch_limit_reached')
 
+    // Owners can no longer self-activate; paid access comes from an audited platform-admin grant.
     const activated = await request(app)
-      .post('/api/v1/billing/subscription/activate')
-      .set('Authorization', 'Bearer owner')
-      .send({})
+      .post(`/api/v1/admin/businesses/${businessAccountId}/subscriptions/manual-activate`)
+      .set('Authorization', 'Bearer admin')
+      .send({ planType: 'monthly' })
     expect(activated.status).toBe(201)
     expect(activated.body.data.account.planTier).toBe('paid')
     expect(activated.body.data.account.planType).toBe('monthly')
@@ -243,7 +246,6 @@ describe('Phase 8 production subscription billing', () => {
     expect(activated.body.data.account.subscriptionEndsAt).toBeTruthy()
     expect(activated.body.data.subscription.provider).toBe('manual')
     expect(activated.body.data.subscription.planType).toBe('monthly')
-    expect(activated.body.data.subscription.amount).toBe(0)
 
     const me = await request(app).get('/api/v1/me').set('Authorization', 'Bearer owner')
     expect(me.status).toBe(200)
@@ -275,10 +277,9 @@ describe('Phase 8 production subscription billing', () => {
     expect(checkout.status).toBe(201)
     expect(checkout.body.data.provider).toBe('stripe')
     expect(checkout.body.data.subscription.currency).toBe('USD')
-    // TEST PRICING: USD plans temporarily set to Stripe's $0.50 minimum (see PLAN_PRICES in billing.service.ts).
-    expect(checkout.body.data.subscription.amount).toBe(0.5)
+    expect(checkout.body.data.subscription.amount).toBe(100)
     expect(checkout.body.data.checkout.url).toBe('https://checkout.stripe.test/cs_test_001')
-    expect(fakeStripeProvider.calls[0].amount).toBe(0.5)
+    expect(fakeStripeProvider.calls[0].amount).toBe(100)
     expect(fakeStripeProvider.calls[0].businessAccountId).toBeTruthy()
     expect(fakeStripeProvider.calls[0].subscriptionId).toBe(checkout.body.data.subscription.id)
 

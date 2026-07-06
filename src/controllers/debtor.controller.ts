@@ -2,8 +2,8 @@ import type { Response } from 'express'
 import type { AppRequest } from '../types/http.js'
 import { asyncHandler } from '../utils/async-handler.js'
 import { objectIdSchema, toObjectId } from '../validators/common.js'
-import { createDebtorPaymentSchema, createDebtorSchema, updateDebtorSchema } from '../validators/debtor.validator.js'
-import { createDebtor, getDebtor, listDebtors, recordDebtorPayment, updateDebtor } from '../services/debtor.service.js'
+import { addDebtorPurchaseSchema, createDebtorPaymentSchema, createDebtorSchema, updateDebtorSchema } from '../validators/debtor.validator.js'
+import { createDebtor, deleteDebtor, getDebtor, listDebtors, recordDebtorPayment, recordManualDebtorPurchase, updateDebtor } from '../services/debtor.service.js'
 
 export const list = asyncHandler(async (req: AppRequest, res: Response) => {
   const branchId = toObjectId(objectIdSchema.parse(req.params.branchId))
@@ -39,4 +39,19 @@ export const payment = asyncHandler(async (req: AppRequest, res: Response) => {
   const body = createDebtorPaymentSchema.parse(req.body)
   const result = await recordDebtorPayment(req.context!, branchId, debtorId, body)
   res.status(201).json({ data: result })
+})
+
+export const purchase = asyncHandler(async (req: AppRequest, res: Response) => {
+  const branchId = toObjectId(objectIdSchema.parse(req.params.branchId))
+  const debtorId = toObjectId(objectIdSchema.parse(req.params.debtorId))
+  const body = addDebtorPurchaseSchema.parse(req.body)
+  const result = await recordManualDebtorPurchase(req.context!, branchId, debtorId, body)
+  res.status(201).json({ data: result })
+})
+
+export const remove = asyncHandler(async (req: AppRequest, res: Response) => {
+  const branchId = toObjectId(objectIdSchema.parse(req.params.branchId))
+  const debtorId = toObjectId(objectIdSchema.parse(req.params.debtorId))
+  const result = await deleteDebtor(req.context!, branchId, debtorId)
+  res.json({ data: result })
 })

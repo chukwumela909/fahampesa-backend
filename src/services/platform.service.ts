@@ -1,5 +1,5 @@
 import { Types } from 'mongoose'
-import { createFirebaseSuperAdmin, listFirebaseAuthUsers, setFirebaseAuthUserDisabled } from '../config/firebase.js'
+import { createFirebaseSuperAdmin, listFirebaseAuthUsers, setFirebaseAuthUserDisabled, setPlatformAdminClaims } from '../config/firebase.js'
 import { BusinessAccountModel } from '../models/business-account.model.js'
 import { BusinessMembershipModel } from '../models/business-membership.model.js'
 import { NotificationAnnouncementModel } from '../models/notification-announcement.model.js'
@@ -212,6 +212,56 @@ export async function listPlatformAdminUsers(context: RequestContext) {
   }
 }
 
+const PLATFORM_ACCESS_ROLES: ReadonlySet<string> = new Set(['super_admin', 'admin'])
+
+function grantsPlatformAccess(role: string, status: string) {
+  return status === 'active' && PLATFORM_ACCESS_ROLES.has(role)
+}
+
+// Platform authorization is carried by the Firebase custom claim (verified on every request in
+// authMiddleware), not by the PlatformAdminUser directory row — so every directory mutation must
+// sync the claim, and the Mongo User mirror, or the "admin" cannot actually call any /admin route.
+async function syncPlatformAdminAccess(email: string, grantAccess: boolean, fullName?: string) {
+  const normalizedEmail = email.toLowerCase()
+  let firebaseUser: Awaited<ReturnType<typeof setPlatformAdminClaims>>
+  try {
+    firebaseUser = await setPlatformAdminClaims(normalizedEmail, grantAccess)
+  } catch (error) {
+    const firebaseError = error as { code?: string }
+    if (firebaseError.code === 'auth/user-not-found') {
+      // Revoking access for someone who never signed up is a no-op, not an error
+      if (!grantAccess) return null
+      throw new ApiError(404, 'user_not_found', `No account exists for ${normalizedEmail}. Ask them to sign up first, then grant admin access.`)
+    }
+    throw new ApiError(502, 'admin_access_sync_failed', 'Failed to update platform access. Please try again.')
+  }
+
+  if (grantAccess) {
+    await UserModel.findOneAndUpdate(
+      { $or: [{ firebaseUid: firebaseUser.uid }, { email: normalizedEmail }] },
+      {
+        $setOnInsert: { firebaseUid: firebaseUser.uid, email: normalizedEmail, fullName: fullName ?? firebaseUser.displayName },
+        $set: { platformRole: 'admin' }
+      },
+      { upsert: true }
+    )
+  } else {
+    await UserModel.updateOne(
+      { $or: [{ firebaseUid: firebaseUser.uid }, { email: normalizedEmail }] },
+      { $set: { platformRole: null } }
+    )
+  }
+
+  return firebaseUser
+}
+
+async function assertNotSelf(context: RequestContext, targetEmail: string) {
+  const actor = await UserModel.findById(context.userId)
+  if (actor?.email && actor.email.toLowerCase() === targetEmail.toLowerCase()) {
+    throw new ApiError(400, 'cannot_revoke_own_access', 'You cannot remove or downgrade your own admin access')
+  }
+}
+
 export async function managePlatformAdminUser(
   context: RequestContext,
   input:
@@ -221,23 +271,62 @@ export async function managePlatformAdminUser(
 ) {
   requirePlatformAdmin(context)
   if (input.action === 'delete') {
-    await PlatformAdminUserModel.findByIdAndDelete(input.id)
+    const existing = await PlatformAdminUserModel.findById(input.id)
+    if (!existing) throw notFound('Admin user not found')
+    await assertNotSelf(context, existing.email)
+    await syncPlatformAdminAccess(existing.email, false)
+    await existing.deleteOne()
     return { success: true, message: 'Admin user deleted successfully' }
   }
 
   if (input.action === 'update') {
-    const updated = await PlatformAdminUserModel.findByIdAndUpdate(input.id, { $set: input }, { new: true })
+    const existing = await PlatformAdminUserModel.findById(input.id)
+    if (!existing) throw notFound('Admin user not found')
+
+    const next = {
+      name: input.name ?? existing.name,
+      email: (input.email ?? existing.email).toLowerCase(),
+      role: input.role ?? existing.role,
+      status: input.status ?? existing.status
+    }
+    const willHaveAccess = grantsPlatformAccess(next.role, next.status)
+    if (!willHaveAccess) await assertNotSelf(context, existing.email)
+
+    // Grant on the (possibly new) email first so a bad target email fails before anything is revoked
+    await syncPlatformAdminAccess(next.email, willHaveAccess, next.name)
+    if (next.email !== existing.email) await syncPlatformAdminAccess(existing.email, false)
+
+    const updated = await PlatformAdminUserModel.findByIdAndUpdate(input.id, { $set: next }, { new: true })
     if (!updated) throw notFound('Admin user not found')
-    return { success: true, message: 'Admin user updated successfully', adminUser: normalizeMongo(updated.toObject({ versionKey: false })) }
+    return {
+      success: true,
+      message: 'Admin user updated successfully',
+      adminUser: normalizeMongo(updated.toObject({ versionKey: false })),
+      accessGranted: willHaveAccess
+    }
   }
+
+  const email = input.email.toLowerCase()
+  const existing = await PlatformAdminUserModel.findOne({ email })
+  if (existing) throw new ApiError(409, 'admin_exists', `${email} is already an admin user`)
+
+  const accessGranted = grantsPlatformAccess(input.role, 'active')
+  if (accessGranted) await syncPlatformAdminAccess(email, true, input.name)
 
   const admin = await PlatformAdminUserModel.create({
     name: input.name,
-    email: input.email.toLowerCase(),
+    email,
     role: input.role,
     createdBy: context.userId
   })
-  return { success: true, message: 'Admin user created successfully', adminUser: normalizeMongo(admin.toObject({ versionKey: false })) }
+  return {
+    success: true,
+    message: accessGranted
+      ? 'Admin user created. Access takes effect the next time they sign in.'
+      : 'Admin user created as a viewer (directory entry only, no platform access).',
+    adminUser: normalizeMongo(admin.toObject({ versionKey: false })),
+    accessGranted
+  }
 }
 
 export async function sendAnnouncement(context: RequestContext, input: { announcementId: string; announcement: Record<string, unknown> }) {

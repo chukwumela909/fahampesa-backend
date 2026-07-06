@@ -143,6 +143,25 @@ export async function createFirebaseSuperAdmin(email: string, password: string |
   return mapFirebaseUser(await admin.auth().getUser(user.uid))
 }
 
+export async function setPlatformAdminClaims(email: string, enabled: boolean) {
+  initFirebaseAdmin()
+  const user = await admin.auth().getUserByEmail(email.toLowerCase())
+  const claims: Record<string, unknown> = { ...(user.customClaims ?? {}) }
+
+  if (enabled) {
+    claims.platformRole = 'admin'
+    claims.admin = true
+  } else {
+    delete claims.platformRole
+    delete claims.role
+    delete claims.superAdmin
+    delete claims.admin
+  }
+
+  await admin.auth().setCustomUserClaims(user.uid, claims)
+  return mapFirebaseUser(await admin.auth().getUser(user.uid))
+}
+
 function hasExplicitFirebaseAdminConfig() {
   return Boolean(env.FIREBASE_SERVICE_ACCOUNT_PATH || (env.FIREBASE_PROJECT_ID && env.FIREBASE_CLIENT_EMAIL && env.FIREBASE_PRIVATE_KEY))
 }

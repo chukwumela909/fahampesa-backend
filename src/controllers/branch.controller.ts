@@ -28,8 +28,13 @@ export const get = asyncHandler(async (req: AppRequest, res: Response) => {
 
 export const update = asyncHandler(async (req: AppRequest, res: Response) => {
   const branchId = toObjectId(objectIdSchema.parse(req.params.branchId))
-  const body = updateBranchSchema.parse(req.body)
-  const branch = await updateBranch(req.context!, branchId, body, {
+  const { managerUserId, ...body } = updateBranchSchema.parse(req.body)
+  const payload = {
+    ...body,
+    // null clears the assignment; a string is cast to an ObjectId; undefined leaves it untouched.
+    ...(managerUserId !== undefined ? { managerUserId: managerUserId === null ? null : toObjectId(managerUserId) } : {})
+  }
+  const branch = await updateBranch(req.context!, branchId, payload, {
     ipAddress: req.ip,
     userAgent: req.header('user-agent')
   })

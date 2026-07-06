@@ -3,7 +3,7 @@ import type { FirebaseTokenVerifier } from '../config/firebase.js'
 import type { AppRequest } from '../types/http.js'
 import { ApiError } from '../utils/api-error.js'
 import { findOrCreateUser } from '../services/user.service.js'
-import { isBusinessWritable, resolveActiveMembership } from '../services/account.service.js'
+import { effectiveSubscriptionStatus, isBusinessWritable, resolveActiveMembership } from '../services/account.service.js'
 
 export function authMiddleware(verifier: FirebaseTokenVerifier) {
   return async (req: AppRequest, _res: Response, next: NextFunction) => {
@@ -47,7 +47,9 @@ export function authMiddleware(verifier: FirebaseTokenVerifier) {
         req.context.assignedBranchIds = resolved.membership.assignedBranchIds
         req.context.accountStatus = resolved.account.accountStatus
         req.context.planTier = resolved.account.planTier
-        req.context.subscriptionStatus = resolved.account.subscriptionStatus
+        // Effective status so read endpoints (/me, /billing/subscription) reflect a lapsed
+        // subscription; write-gating still re-checks the end date in isBusinessWritable.
+        req.context.subscriptionStatus = effectiveSubscriptionStatus(resolved.account)
         req.context.subscriptionEndsAt = resolved.account.subscriptionEndsAt
         req.context.branchLimitOverride = resolved.account.branchLimitOverride
       }

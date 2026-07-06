@@ -20,15 +20,11 @@ import type { MpesaCallbackInput, PlanType } from '../validators/billing.validat
 const PLAN_PRICES = {
   monthly: {
     KENYA: { amount: 2000, currency: 'KSH' as const },
-    // TEST: reduced to Stripe's USD minimum ($0.50) to verify card payments end-to-end.
-    // Revert to `amount: 10` before production.
-    OTHER: { amount: 0.5, currency: 'USD' as const }
+    OTHER: { amount: 10, currency: 'USD' as const }
   },
   yearly: {
     KENYA: { amount: 20000, currency: 'KSH' as const },
-    // TEST: reduced to Stripe's USD minimum ($0.50) to verify card payments end-to-end.
-    // Revert to `amount: 100` before production.
-    OTHER: { amount: 0.5, currency: 'USD' as const }
+    OTHER: { amount: 100, currency: 'USD' as const }
   }
 }
 
@@ -77,67 +73,6 @@ export async function getBillingHistory(context: RequestContext) {
   requireBusinessContext(context)
   const subscriptions = await SubscriptionModel.find({ businessAccountId: context.businessAccountId }).sort({ createdAt: -1 })
   return subscriptions.map(serializeSubscription)
-}
-
-export async function activateMonthlySubscription(context: RequestContext, requestMeta?: { ipAddress?: string; userAgent?: string }) {
-  requireOwner(context)
-  return withTransaction(async (session) => {
-    const activeSession = session.inTransaction() ? session : undefined
-    const account = await BusinessAccountModel.findById(context.businessAccountId).session(activeSession ?? null)
-    if (!account) throw notFound('Business account not found')
-
-    const startDate = new Date()
-    const baseDate = hasActivePaidAccess(account) && account.subscriptionEndsAt ? account.subscriptionEndsAt : startDate
-    const endDate = addPlanDuration(baseDate, 'monthly')
-    const subscriptionId = new Types.ObjectId()
-    const [subscription] = await SubscriptionModel.create(
-      [
-        {
-          _id: subscriptionId,
-          businessAccountId: account._id,
-          userId: context.userId,
-          provider: 'manual',
-          planType: 'monthly',
-          status: 'active',
-          amount: 0,
-          currency: currencyForAccount(account.currency),
-          transactionId: `AUTO-${Date.now()}`,
-          startDate,
-          endDate,
-          receiptNumber: `AUTO-${subscriptionId.toString().slice(-8).toUpperCase()}`
-        }
-      ],
-      activeSession ? { session: activeSession } : {}
-    )
-
-    account.planTier = 'paid'
-    account.planType = 'monthly'
-    account.subscriptionStatus = 'active'
-    account.subscriptionStartsAt = startDate
-    account.subscriptionEndsAt = endDate
-    await account.save(activeSession ? { session: activeSession } : undefined)
-
-    await writeAuditLog(
-      {
-        scope: 'business',
-        businessAccountId: account._id,
-        actorUserId: context.userId,
-        actorRole: context.role,
-        action: 'business.subscription_auto_activated',
-        targetType: 'subscription',
-        targetId: subscription._id,
-        metadata: { planType: 'monthly', endDate },
-        ipAddress: requestMeta?.ipAddress,
-        userAgent: requestMeta?.userAgent
-      },
-      activeSession
-    )
-
-    return {
-      account: normalizeMongo(account.toObject({ versionKey: false })),
-      subscription: serializeSubscription(subscription)
-    }
-  })
 }
 
 export async function startMpesaCheckout(context: RequestContext, input: { planType: PlanType; phoneNumber: string; country?: string }) {

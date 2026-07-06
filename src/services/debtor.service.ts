@@ -79,6 +79,49 @@ export async function updateDebtor(
   return serializeDebtor(debtor)
 }
 
+export async function deleteDebtor(context: RequestContext, branchId: Types.ObjectId, debtorId: Types.ObjectId) {
+  requireManagerRole(context)
+  await getBranchForContext(context, branchId)
+  const debtor = await DebtorModel.findOne({
+    _id: debtorId,
+    businessAccountId: context.businessAccountId,
+    branchId,
+    isActive: true
+  })
+  if (!debtor) throw notFound('Debtor not found')
+  if (debtor.currentDebt > 0) {
+    throw new ApiError(
+      409,
+      'debtor_has_outstanding_debt',
+      'Cannot delete a debtor with an outstanding balance. Settle or write off the debt first.'
+    )
+  }
+  debtor.isActive = false
+  await debtor.save()
+  return { id: debtor._id.toString(), name: debtor.name }
+}
+
+// Manually record a debt/purchase against an existing debtor (e.g. the "add debt to existing
+// debtor" flow) without going through a sale. Reuses the credit-limit-guarded purchase logic.
+export async function recordManualDebtorPurchase(
+  context: RequestContext,
+  branchId: Types.ObjectId,
+  debtorId: Types.ObjectId,
+  input: { amount: number; dueDate?: Date | null }
+) {
+  requireManagerRole(context)
+  await getBranchForContext(context, branchId)
+  return withTransaction(async (session) => {
+    const debtor = await addDebtorPurchase(context, branchId, debtorId, input.amount, session)
+    if (input.dueDate !== undefined) {
+      debtor.dueDate = input.dueDate
+      debtor.paymentStatus = getPaymentStatus(debtor.currentDebt, debtor.dueDate)
+      await debtor.save(session.inTransaction() ? { session } : undefined)
+    }
+    return serializeDebtor(debtor)
+  })
+}
+
 export async function recordDebtorPayment(
   context: RequestContext,
   branchId: Types.ObjectId,
