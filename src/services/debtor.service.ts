@@ -13,6 +13,8 @@ export interface DebtorInput {
   email?: string
   creditLimit?: number
   dueDate?: Date | null
+  note?: string
+  openingDebt?: number
 }
 
 export async function listDebtors(context: RequestContext, branchId: Types.ObjectId) {
@@ -29,11 +31,20 @@ export async function listDebtors(context: RequestContext, branchId: Types.Objec
 export async function createDebtor(context: RequestContext, branchId: Types.ObjectId, input: DebtorInput) {
   requireManagerRole(context)
   await getBranchForContext(context, branchId)
+  const { openingDebt, ...fields } = input
+  const creditLimit = input.creditLimit ?? 0
+  const initialDebt = openingDebt ?? 0
+  if (creditLimit > 0 && initialDebt > creditLimit) {
+    throw new ApiError(409, 'credit_limit_exceeded', 'Opening debt would exceed debtor credit limit')
+  }
   const debtor = await DebtorModel.create({
     businessAccountId: context.businessAccountId,
     branchId,
-    ...input,
-    creditLimit: input.creditLimit ?? 0,
+    ...fields,
+    creditLimit,
+    currentDebt: initialDebt,
+    totalPurchases: initialDebt,
+    paymentStatus: getPaymentStatus(initialDebt, input.dueDate),
     createdBy: context.userId
   })
   return serializeDebtor(debtor)

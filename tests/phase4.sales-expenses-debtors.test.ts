@@ -255,6 +255,44 @@ describe('Phase 4 sales, expenses, and debtors', () => {
     expect(payment.body.data.payment.outstandingBalance).toBe(700)
   })
 
+  it('persists opening debt and note when creating a debtor, and note edits', async () => {
+    const onboarded = await onboardOwner()
+    const branchId = onboarded.body.data.branch.id
+
+    const debtor = await request(app)
+      .post(`/api/v1/branches/${branchId}/debtors`)
+      .set('Authorization', 'Bearer owner')
+      .send({
+        name: 'Chao Customer',
+        phone: '+254700000003',
+        creditLimit: 5000,
+        openingDebt: 1200,
+        note: 'Carried over from the old ledger'
+      })
+    expect(debtor.status).toBe(201)
+    expect(debtor.body.data.currentDebt).toBe(1200)
+    expect(debtor.body.data.totalPurchases).toBe(1200)
+    expect(debtor.body.data.paymentStatus).toBe('outstanding')
+    expect(debtor.body.data.note).toBe('Carried over from the old ledger')
+
+    // Opening debt above the credit limit is rejected like any other purchase
+    const overLimit = await request(app)
+      .post(`/api/v1/branches/${branchId}/debtors`)
+      .set('Authorization', 'Bearer owner')
+      .send({ name: 'Over Limit', creditLimit: 1000, openingDebt: 2000 })
+    expect(overLimit.status).toBe(409)
+    expect(overLimit.body.error.code).toBe('credit_limit_exceeded')
+
+    // Note is editable; openingDebt is create-only and ignored on update
+    const updated = await request(app)
+      .patch(`/api/v1/branches/${branchId}/debtors/${debtor.body.data.id}`)
+      .set('Authorization', 'Bearer owner')
+      .send({ note: 'Updated note', openingDebt: 9999 })
+    expect(updated.status).toBe(200)
+    expect(updated.body.data.note).toBe('Updated note')
+    expect(updated.body.data.currentDebt).toBe(1200)
+  })
+
   it('adds manual debt to an existing debtor and blocks delete until the balance is clear', async () => {
     const onboarded = await onboardOwner()
     const branchId = onboarded.body.data.branch.id

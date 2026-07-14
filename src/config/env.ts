@@ -19,6 +19,11 @@ const envSchema = z.object({
     .transform((value) => value === 'true'),
   APP_BASE_URL: z.string().url().default('http://localhost:4000'),
   NEXT_PUBLIC_BASE_URL: z.string().url().optional(),
+  // Web-app base used in staff invitation links; falls back to NEXT_PUBLIC_BASE_URL.
+  STAFF_INVITE_BASE_URL: z.string().url().optional(),
+  // Resend transactional email. Optional: when unset, emails are skipped (never blocks the action).
+  RESEND_API_KEY: z.string().trim().min(1).optional(),
+  RESEND_FROM_EMAIL: z.string().trim().min(1).default('FahamPesa <no-reply@worldstreetgold.com>'),
   MPESA_SHORTCODE: z.string().trim().min(1).optional(),
   MPESA_ENVIRONMENT: z.enum(['sandbox', 'production']).default('sandbox'),
   MPESA_PASSKEY: z.string().trim().min(1).optional(),

@@ -9,6 +9,7 @@ import { UserModel } from '../models/user.model.js'
 import type { RequestContext } from '../types/http.js'
 import { ApiError } from '../utils/api-error.js'
 import { normalizeMongo } from '../utils/serialize.js'
+import { sendStaffInvitationEmail } from './email.service.js'
 
 const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000
 
@@ -82,7 +83,7 @@ export async function inviteStaff(context: RequestContext, input: {
   requireManagerRole(context)
   if (!context.businessAccountId) throw new ApiError(403, 'business_required', 'Business context required')
 
-  return createStaffInvitation({
+  const invitation = await createStaffInvitation({
     businessAccountId: context.businessAccountId,
     email: input.email,
     role: input.role,
@@ -90,6 +91,22 @@ export async function inviteStaff(context: RequestContext, input: {
     permissions: input.permissions,
     invitedBy: context.userId
   })
+
+  // Best-effort invitation email; the invite (and its shareable link) succeeds either way.
+  const [account, branches] = await Promise.all([
+    BusinessAccountModel.findById(context.businessAccountId).select('businessName').lean(),
+    BranchModel.find({ _id: { $in: input.branchIds.map(objectId) } }).select('name').lean()
+  ])
+  const emailSent = await sendStaffInvitationEmail({
+    to: input.email,
+    businessName: account?.businessName ?? 'a business',
+    role: mapInvitationRole(input.role),
+    branchNames: branches.map((branch) => branch.name),
+    inviteUrl: String((invitation as { inviteUrl?: unknown }).inviteUrl ?? ''),
+    expiresAt: new Date(Date.now() + INVITATION_TTL_MS)
+  })
+
+  return { ...invitation, emailSent }
 }
 
 export async function cancelStaffInvitation(context: RequestContext, invitationId: Types.ObjectId) {
@@ -202,7 +219,10 @@ export function serializeInvitation(invitation: HydratedDocument<StaffInvitation
 }
 
 function buildInviteUrl(token: string) {
-  const baseUrl = env.NEXT_PUBLIC_BASE_URL ?? env.APP_BASE_URL
+  const baseUrl =
+    env.STAFF_INVITE_BASE_URL ??
+    env.NEXT_PUBLIC_BASE_URL ??
+    (env.NODE_ENV === 'production' ? 'https://fahampesa.com' : env.APP_BASE_URL)
   const url = new URL('/staff/invite', baseUrl)
   url.searchParams.set('token', token)
   return url.toString()

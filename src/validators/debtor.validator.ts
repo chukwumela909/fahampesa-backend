@@ -7,10 +7,14 @@ export const createDebtorSchema = z.object({
   phone: z.string().trim().optional(),
   email: z.string().trim().email().optional(),
   creditLimit: z.number().min(0).optional(),
-  dueDate: z.coerce.date().nullable().optional()
+  dueDate: z.coerce.date().nullable().optional(),
+  note: z.string().trim().optional(),
+  // Pre-existing debt carried in at creation time; applied once to currentDebt.
+  openingDebt: z.number().min(0).optional()
 })
 
-export const updateDebtorSchema = createDebtorSchema.partial().extend({
+// openingDebt is create-only: editing a debtor must not silently rewrite their balance.
+export const updateDebtorSchema = createDebtorSchema.omit({ openingDebt: true }).partial().extend({
   isActive: z.boolean().optional()
 })
 

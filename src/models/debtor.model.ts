@@ -9,6 +9,7 @@ const debtorSchema = new Schema(
     email: { type: String, trim: true, lowercase: true },
     creditLimit: { type: Number, default: 0, min: 0 },
     currentDebt: { type: Number, default: 0, min: 0 },
+    note: { type: String, trim: true, default: '' },
     totalPurchases: { type: Number, default: 0, min: 0 },
     totalPayments: { type: Number, default: 0, min: 0 },
     paymentStatus: {
