@@ -6,7 +6,10 @@ export const createDebtorSchema = z.object({
   name: z.string().trim().min(1),
   phone: z.string().trim().optional(),
   email: z.string().trim().email().optional(),
+  address: z.string().trim().optional(),
   creditLimit: z.number().min(0).optional(),
+  // When the debt was taken (backdatable); defaults to creation time.
+  debtDate: z.coerce.date().nullable().optional(),
   dueDate: z.coerce.date().nullable().optional(),
   note: z.string().trim().optional(),
   // Pre-existing debt carried in at creation time; applied once to currentDebt.

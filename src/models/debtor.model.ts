@@ -7,6 +7,9 @@ const debtorSchema = new Schema(
     name: { type: String, required: true, trim: true },
     phone: { type: String, trim: true },
     email: { type: String, trim: true, lowercase: true },
+    address: { type: String, trim: true, default: '' },
+    // When the debt was taken (user-editable so old debts can be backdated).
+    debtDate: { type: Date, default: null },
     creditLimit: { type: Number, default: 0, min: 0 },
     currentDebt: { type: Number, default: 0, min: 0 },
     note: { type: String, trim: true, default: '' },

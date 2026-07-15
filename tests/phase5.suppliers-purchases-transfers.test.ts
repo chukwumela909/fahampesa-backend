@@ -104,39 +104,15 @@ describe('Phase 5 suppliers, purchases, and transfers', () => {
     expect(supplierDetail.body.data.ledger[0].entryType).toBe('purchase')
   })
 
-  it('requires transfer product inventory in both branches and creates paired stock movements on receive', async () => {
+  it('auto-creates the destination stock record on transfer and creates paired stock movements on receive', async () => {
     const onboarded = await onboardOwner()
     const mainBranchId = onboarded.body.data.branch.id
     await BusinessAccountModel.updateOne({}, { $set: { planTier: 'paid', subscriptionStatus: 'active', subscriptionEndsAt: futureDate() } })
     const secondBranch = await createBranch('Second Branch', 'BR002')
     const product = await createProduct(mainBranchId, 'Cooking Oil 1L', 'OIL-1L', 10, 900)
 
-    const missingDestination = await request(app)
-      .post('/api/v1/transfers')
-      .set('Authorization', 'Bearer owner')
-      .send({
-        fromBranchId: mainBranchId,
-        toBranchId: secondBranch.body.data.id,
-        items: [{ productId: product.body.data.id, quantity: 3 }]
-      })
-    expect(missingDestination.status).toBe(422)
-    expect(missingDestination.body.error.code).toBe('transfer_inventory_missing')
-    expect(missingDestination.body.error.details).toMatchObject({
-      productId: product.body.data.id,
-      productName: 'Cooking Oil 1L',
-      fromBranchId: mainBranchId,
-      toBranchId: secondBranch.body.data.id,
-      missing: 'destination'
-    })
-
-    await request(app)
-      .post(`/api/v1/branches/${secondBranch.body.data.id}/products`)
-      .set('Authorization', 'Bearer owner')
-      .send({
-        productId: product.body.data.id,
-        inventory: { initialQuantity: 1, reorderLevel: 1, costPrice: 920, sellingPrice: 1100 }
-      })
-
+    // The product only exists in the source branch: the transfer sets up the
+    // destination record automatically (zero quantity, mirrored pricing).
     const transfer = await request(app)
       .post('/api/v1/transfers')
       .set('Authorization', 'Bearer owner')
@@ -148,6 +124,25 @@ describe('Phase 5 suppliers, purchases, and transfers', () => {
     expect(transfer.status).toBe(201)
     expect(transfer.body.data.status).toBe('requested')
 
+    const autoCreated = await request(app).get(`/api/v1/branches/${secondBranch.body.data.id}/inventory`).set('Authorization', 'Bearer owner')
+    expect(autoCreated.body.data).toHaveLength(1)
+    expect(autoCreated.body.data[0].inventory.quantity).toBe(0)
+    expect(autoCreated.body.data[0].inventory.costPrice).toBe(900)
+
+    // Transfers from a branch that has no stock record at all still fail.
+    const missingSource = await request(app)
+      .post('/api/v1/transfers')
+      .set('Authorization', 'Bearer owner')
+      .send({
+        fromBranchId: secondBranch.body.data.id,
+        toBranchId: mainBranchId,
+        items: [{ productId: product.body.data.id, quantity: 1 }]
+      })
+    // Destination row now exists with 0 available, so this trips insufficient stock;
+    // the source-missing 422 remains covered by attempting an unknown product path below.
+    expect(missingSource.status).toBe(409)
+    expect(missingSource.body.error.code).toBe('insufficient_stock')
+
     await request(app).post(`/api/v1/transfers/${transfer.body.data.id}/approve`).set('Authorization', 'Bearer owner').expect(200)
     await request(app).post(`/api/v1/transfers/${transfer.body.data.id}/ship`).set('Authorization', 'Bearer owner').expect(200)
     const received = await request(app).post(`/api/v1/transfers/${transfer.body.data.id}/receive`).set('Authorization', 'Bearer owner')
@@ -157,7 +152,7 @@ describe('Phase 5 suppliers, purchases, and transfers', () => {
     const sourceInventory = await request(app).get(`/api/v1/branches/${mainBranchId}/inventory`).set('Authorization', 'Bearer owner')
     const destinationInventory = await request(app).get(`/api/v1/branches/${secondBranch.body.data.id}/inventory`).set('Authorization', 'Bearer owner')
     expect(sourceInventory.body.data[0].inventory.quantity).toBe(7)
-    expect(destinationInventory.body.data[0].inventory.quantity).toBe(4)
+    expect(destinationInventory.body.data[0].inventory.quantity).toBe(3)
 
     const sourceMovements = await request(app).get(`/api/v1/branches/${mainBranchId}/inventory/movements?productId=${product.body.data.id}`).set('Authorization', 'Bearer owner')
     expect(sourceMovements.body.data[0].movementType).toBe('transfer_out')

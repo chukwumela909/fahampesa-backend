@@ -265,8 +265,10 @@ describe('Phase 4 sales, expenses, and debtors', () => {
       .send({
         name: 'Chao Customer',
         phone: '+254700000003',
+        address: '14 Moi Avenue, Mombasa',
         creditLimit: 5000,
         openingDebt: 1200,
+        debtDate: '2026-07-01T00:00:00.000Z',
         note: 'Carried over from the old ledger'
       })
     expect(debtor.status).toBe(201)
@@ -274,6 +276,8 @@ describe('Phase 4 sales, expenses, and debtors', () => {
     expect(debtor.body.data.totalPurchases).toBe(1200)
     expect(debtor.body.data.paymentStatus).toBe('outstanding')
     expect(debtor.body.data.note).toBe('Carried over from the old ledger')
+    expect(debtor.body.data.address).toBe('14 Moi Avenue, Mombasa')
+    expect(debtor.body.data.debtDate).toBe('2026-07-01T00:00:00.000Z')
 
     // Opening debt above the credit limit is rejected like any other purchase
     const overLimit = await request(app)

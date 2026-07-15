@@ -11,7 +11,9 @@ export interface DebtorInput {
   name: string
   phone?: string
   email?: string
+  address?: string
   creditLimit?: number
+  debtDate?: Date | null
   dueDate?: Date | null
   note?: string
   openingDebt?: number
@@ -42,6 +44,7 @@ export async function createDebtor(context: RequestContext, branchId: Types.Obje
     branchId,
     ...fields,
     creditLimit,
+    debtDate: input.debtDate ?? new Date(),
     currentDebt: initialDebt,
     totalPurchases: initialDebt,
     paymentStatus: getPaymentStatus(initialDebt, input.dueDate),

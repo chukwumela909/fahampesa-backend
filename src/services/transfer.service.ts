@@ -41,11 +41,13 @@ export async function createTransfer(context: RequestContext, input: CreateTrans
       const product = await ProductModel.findOne({ _id: item.productId, businessAccountId: context.businessAccountId, isActive: true }).session(activeSession ?? null)
       if (!product) throw notFound('Product not found')
       const source = await InventoryItemModel.findOne({ businessAccountId: context.businessAccountId, branchId: input.fromBranchId, productId: item.productId, status: { $ne: 'discontinued' } }).session(activeSession ?? null)
-      const destination = await InventoryItemModel.findOne({ businessAccountId: context.businessAccountId, branchId: input.toBranchId, productId: item.productId, status: { $ne: 'discontinued' } }).session(activeSession ?? null)
-      if (!source || !destination) {
-        throw transferInventoryMissingError(item.productId, product.name, input.fromBranchId, input.toBranchId, Boolean(source), Boolean(destination))
+      if (!source) {
+        throw transferInventoryMissingError(item.productId, product.name, input.fromBranchId, input.toBranchId)
       }
       if (source.availableQuantity < item.quantity) throw new ApiError(409, 'insufficient_stock', `Insufficient stock for ${product.name}`)
+      // The destination branch doesn't need the product set up in advance: the
+      // transfer creates its (zero-quantity) stock record, mirroring source pricing.
+      await ensureDestinationInventory(context, input.toBranchId, item.productId, source, activeSession)
       items.push({ productId: item.productId, productName: product.name, quantity: item.quantity })
     }
 
@@ -94,11 +96,12 @@ export async function receiveTransfer(context: RequestContext, transferId: Types
 
     for (const item of transfer.items) {
       const source = await InventoryItemModel.findOne({ businessAccountId: context.businessAccountId, branchId: transfer.fromBranchId, productId: item.productId, status: { $ne: 'discontinued' } }).session(activeSession ?? null)
-      const destination = await InventoryItemModel.findOne({ businessAccountId: context.businessAccountId, branchId: transfer.toBranchId, productId: item.productId, status: { $ne: 'discontinued' } }).session(activeSession ?? null)
-      if (!source || !destination) {
-        throw transferInventoryMissingError(item.productId, item.productName, transfer.fromBranchId, transfer.toBranchId, Boolean(source), Boolean(destination))
+      if (!source) {
+        throw transferInventoryMissingError(item.productId, item.productName, transfer.fromBranchId, transfer.toBranchId)
       }
       if (source.availableQuantity < item.quantity) throw new ApiError(409, 'insufficient_stock', `Insufficient stock for ${item.productName}`)
+      // Covers transfers created before destination auto-setup existed, or rows removed mid-flight.
+      const destination = await ensureDestinationInventory(context, transfer.toBranchId, item.productId, source, activeSession)
 
       const sourcePrevious = source.quantity
       const destinationPrevious = destination.quantity
@@ -198,14 +201,55 @@ function serializeTransfer(transfer: { toObject(options?: unknown): unknown }) {
   return normalizeMongo(transfer.toObject({ versionKey: false })) as Record<string, unknown>
 }
 
-function transferInventoryMissingError(productId: Types.ObjectId, productName: string, fromBranchId: Types.ObjectId, toBranchId: Types.ObjectId, hasSource: boolean, hasDestination: boolean) {
-  return new ApiError(422, 'transfer_inventory_missing', 'Product must exist in both source and destination branch inventory', {
+function transferInventoryMissingError(productId: Types.ObjectId, productName: string, fromBranchId: Types.ObjectId, toBranchId: Types.ObjectId) {
+  return new ApiError(422, 'transfer_inventory_missing', 'Product has no stock record in the source branch', {
     productId: productId.toString(),
     productName,
     fromBranchId: fromBranchId.toString(),
     toBranchId: toBranchId.toString(),
-    missing: hasSource ? 'destination' : hasDestination ? 'source' : 'both'
+    missing: 'source'
   })
+}
+
+/** Find the destination branch's stock record for a product, creating a
+ *  zero-quantity one (mirroring the source's pricing/reorder level) when the
+ *  product hasn't been set up there yet. */
+async function ensureDestinationInventory(
+  context: RequestContext,
+  toBranchId: Types.ObjectId,
+  productId: Types.ObjectId,
+  source: InstanceType<typeof InventoryItemModel>,
+  session?: ClientSession
+) {
+  const existing = await InventoryItemModel.findOne({
+    businessAccountId: context.businessAccountId,
+    branchId: toBranchId,
+    productId,
+    status: { $ne: 'discontinued' }
+  }).session(session ?? null)
+  if (existing) return existing
+
+  const [created] = await InventoryItemModel.create(
+    [
+      {
+        businessAccountId: context.businessAccountId,
+        branchId: toBranchId,
+        productId,
+        quantity: 0,
+        reservedQuantity: 0,
+        availableQuantity: 0,
+        reorderLevel: source.reorderLevel,
+        averageCostPrice: source.averageCostPrice,
+        lastCostPrice: source.lastCostPrice,
+        costPrice: source.costPrice,
+        sellingPrice: source.sellingPrice,
+        stockValue: 0,
+        status: 'out_of_stock'
+      }
+    ],
+    session ? { session } : {}
+  )
+  return created
 }
 
 async function nextTransferNumber(businessAccountId: Types.ObjectId, session?: ClientSession) {
