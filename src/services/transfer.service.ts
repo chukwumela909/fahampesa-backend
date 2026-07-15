@@ -3,6 +3,7 @@ import { InventoryItemModel } from '../models/inventory-item.model.js'
 import { ProductModel } from '../models/product.model.js'
 import { StockMovementModel } from '../models/stock-movement.model.js'
 import { StockTransferModel } from '../models/stock-transfer.model.js'
+import { nextDocumentNumber } from './sequence.service.js'
 import type { RequestContext } from '../types/http.js'
 import { ApiError, notFound } from '../utils/api-error.js'
 import { normalizeMongo } from '../utils/serialize.js'
@@ -253,8 +254,7 @@ async function ensureDestinationInventory(
 }
 
 async function nextTransferNumber(businessAccountId: Types.ObjectId, session?: ClientSession) {
-  const count = await StockTransferModel.countDocuments({ businessAccountId }).session(session ?? null)
-  return `TRF-${String(count + 1).padStart(6, '0')}`
+  return nextDocumentNumber(businessAccountId, 'transfer', 'TRF-', 'transferNumber', StockTransferModel as never, session)
 }
 
 function requireManagerRole(context: RequestContext) {

@@ -3,15 +3,15 @@ import { z } from 'zod'
 const debtorPaymentMethodSchema = z.enum(['cash', 'mpesa', 'bank_transfer', 'card', 'cheque', 'other'])
 
 export const createDebtorSchema = z.object({
-  name: z.string().trim().min(1),
-  phone: z.string().trim().optional(),
+  name: z.string().trim().min(1).max(120),
+  phone: z.string().trim().max(30).optional(),
   email: z.string().trim().email().optional(),
-  address: z.string().trim().optional(),
+  address: z.string().trim().max(300).optional(),
   creditLimit: z.number().min(0).optional(),
   // When the debt was taken (backdatable); defaults to creation time.
   debtDate: z.coerce.date().nullable().optional(),
   dueDate: z.coerce.date().nullable().optional(),
-  note: z.string().trim().optional(),
+  note: z.string().trim().max(1000).optional(),
   // Pre-existing debt carried in at creation time; applied once to currentDebt.
   openingDebt: z.number().min(0).optional()
 })

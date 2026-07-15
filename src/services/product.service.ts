@@ -31,11 +31,13 @@ export interface ProductIdentityInput {
 
 export async function listBranchProducts(context: RequestContext, branchId: Types.ObjectId, search?: string) {
   await getBranchForContext(context, branchId)
+  // createdAt (not updatedAt): sorting by update time reshuffled the POS grid on
+  // every sale/transfer, so cashiers lost products' positions mid-shift.
   const inventoryItems = await InventoryItemModel.find({
     businessAccountId: context.businessAccountId,
     branchId,
     status: { $ne: 'discontinued' }
-  }).sort({ updatedAt: -1 })
+  }).sort({ createdAt: -1 })
 
   const productIds = inventoryItems.map((item) => item.productId)
   const productQuery: Record<string, unknown> = {

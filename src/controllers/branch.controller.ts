@@ -7,8 +7,8 @@ import { createBranchSchema, updateBranchSchema } from '../validators/branch.val
 import { createBranch, deleteBranch, disableBranch, enableBranch, getBranchForContext, listBranches, updateBranch } from '../services/branch.service.js'
 
 export const list = asyncHandler(async (req: AppRequest, res: Response) => {
-  const branches = await listBranches(req.context!)
-  res.json({ data: branches.map(serializeDocument) })
+  // listBranches returns already-serialized records enriched with card metrics.
+  res.json({ data: await listBranches(req.context!) })
 })
 
 export const create = asyncHandler(async (req: AppRequest, res: Response) => {

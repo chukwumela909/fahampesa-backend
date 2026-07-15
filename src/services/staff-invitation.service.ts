@@ -168,11 +168,20 @@ export async function acceptStaffInvitation(context: RequestContext, token: stri
     userId: context.userId
   })
   if (existing) {
+    // Already a member: treat accepting as a no-op success instead of consuming
+    // the invite AND erroring (which read as a confusing dead-end to the invitee).
     invitation.status = 'accepted'
     invitation.acceptedAt = new Date()
     invitation.acceptedByUserId = context.userId
     await invitation.save()
-    throw new ApiError(409, 'staff_already_exists', 'User is already a staff member for this business')
+    return {
+      invitation: serializeInvitation(invitation),
+      membership: normalizeMongo(existing.toObject({ versionKey: false })),
+      businessAccountId: invitation.businessAccountId.toString(),
+      role: existing.role,
+      assignedBranchIds: existing.assignedBranchIds.map((id) => id.toString()),
+      alreadyMember: true
+    }
   }
 
   await UserModel.updateOne(
@@ -211,6 +220,11 @@ export async function acceptStaffInvitation(context: RequestContext, token: stri
 export function serializeInvitation(invitation: HydratedDocument<StaffInvitationDocument>, rawToken?: string) {
   const base = normalizeMongo(invitation.toObject({ versionKey: false })) as Record<string, unknown>
   delete base.tokenHash
+  // Surface expiry as a real state: a "pending" invite past its TTL is dead, and
+  // showing it as Pending forever hid the need to re-send.
+  const expired = invitation.status === 'pending' && invitation.expiresAt.getTime() <= Date.now()
+  base.expired = expired
+  if (expired) base.status = 'expired'
   if (!rawToken) return base
   return {
     ...base,

@@ -17,6 +17,8 @@ import { PurchaseOrderModel } from '../models/purchase-order.model.js'
 import { AlertModel } from '../models/alert.model.js'
 import { StockTransferModel } from '../models/stock-transfer.model.js'
 import { withTransaction } from '../config/database.js'
+import { UserModel } from '../models/user.model.js'
+import { serializeDocument } from '../utils/serialize.js'
 import { ApiError, notFound } from '../utils/api-error.js'
 import { getEffectiveBranchLimit } from './account.service.js'
 import { writeAuditLog } from './audit.service.js'
@@ -58,14 +60,47 @@ export async function listBranches(context: RequestContext) {
   if (!context.businessAccountId || !context.role) throw new ApiError(403, 'business_required', 'Business context required')
 
   const base = { businessAccountId: context.businessAccountId, status: { $ne: 'disabled' } }
-  if (context.role === 'owner') {
-    return BranchModel.find(base).sort({ createdAt: 1 })
-  }
+  const query = context.role === 'owner' ? base : { ...base, _id: { $in: context.assignedBranchIds } }
+  const branches = await BranchModel.find(query).sort({ createdAt: 1 })
 
-  return BranchModel.find({
-    ...base,
-    _id: { $in: context.assignedBranchIds }
-  }).sort({ createdAt: 1 })
+  // Enrich with the metrics and manager name the clients render on branch cards
+  // (previously always blank/0 because only the separate performance report computed them).
+  const branchIds = branches.map((branch) => branch._id)
+  const metrics = branchIds.length
+    ? await InventoryItemModel.aggregate([
+        {
+          $match: {
+            businessAccountId: context.businessAccountId,
+            branchId: { $in: branchIds },
+            status: { $ne: 'discontinued' }
+          }
+        },
+        {
+          $group: {
+            _id: '$branchId',
+            productCount: { $sum: 1 },
+            inventoryValue: { $sum: '$stockValue' },
+            lowStockItemsCount: { $sum: { $cond: [{ $eq: ['$status', 'low_stock'] }, 1, 0] } }
+          }
+        }
+      ])
+    : []
+  const metricsByBranch = new Map(metrics.map((m) => [String(m._id), m]))
+
+  const managerIds = [...new Set(branches.map((b) => b.managerUserId).filter(Boolean).map(String))]
+  const managers = managerIds.length ? await UserModel.find({ _id: { $in: managerIds } }).select('fullName email') : []
+  const managerById = new Map(managers.map((u) => [String(u._id), u.fullName || u.email || null]))
+
+  return branches.map((branch) => {
+    const m = metricsByBranch.get(String(branch._id))
+    return {
+      ...(serializeDocument(branch) as Record<string, unknown>),
+      productCount: m?.productCount ?? 0,
+      inventoryValue: m?.inventoryValue ?? 0,
+      lowStockItemsCount: m?.lowStockItemsCount ?? 0,
+      managerName: branch.managerUserId ? managerById.get(String(branch.managerUserId)) ?? null : null
+    }
+  })
 }
 
 export async function getBranchForContext(context: RequestContext, branchId: Types.ObjectId, includeDisabled = false) {

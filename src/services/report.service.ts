@@ -224,9 +224,19 @@ function denyCashierFinancialReport(context: RequestContext) {
 function buildDateRange(input: ReportScopeInput) {
   const range: Record<string, Date> = {}
   if (input.from) range.$gte = input.from
-  if (input.to) range.$lte = input.to
+  if (input.to) range.$lte = endOfDayIfDateOnly(input.to)
   if (Object.keys(range).length === 0) return { createdAt: {}, date: {} }
   return { createdAt: { createdAt: range }, date: { date: range } }
+}
+
+// Clients send date-only ranges ("2026-07-15"), which coerce to midnight — an
+// exclusive `to` that silently drops the whole final day (and made "today"
+// reports return nothing). Treat a midnight `to` as inclusive end-of-day.
+function endOfDayIfDateOnly(to: Date) {
+  if (to.getUTCHours() === 0 && to.getUTCMinutes() === 0 && to.getUTCSeconds() === 0 && to.getUTCMilliseconds() === 0) {
+    return new Date(to.getTime() + 24 * 60 * 60 * 1000 - 1)
+  }
+  return to
 }
 
 function sum<T>(items: T[], field: keyof T) {

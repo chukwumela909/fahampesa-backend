@@ -37,7 +37,7 @@ export const createSaleSchema = z
     tax: z.number().min(0).optional(),
     discount: z.number().min(0).optional(),
     discountType: discountTypeSchema.optional(),
-    notes: z.string().trim().optional()
+    notes: z.string().trim().max(1000).optional()
   })
   .superRefine((value, ctx) => {
     if (value.discountType === 'percentage' && (value.discount ?? 0) > 100) {
@@ -59,7 +59,7 @@ export const createSaleSchema = z
 
 export const updateSaleSchema = z.object({
   customer: customerSchema.optional(),
-  notes: z.string().trim().optional()
+  notes: z.string().trim().max(1000).optional()
 })
 
 export const refundSaleSchema = z.object({

@@ -3,6 +3,7 @@ import { InventoryItemModel } from '../models/inventory-item.model.js'
 import { ProductModel } from '../models/product.model.js'
 import { SaleModel } from '../models/sale.model.js'
 import { RefundModel } from '../models/refund.model.js'
+import { nextDocumentNumber } from './sequence.service.js'
 import { StockMovementModel } from '../models/stock-movement.model.js'
 import type { RequestContext } from '../types/http.js'
 import { ApiError, notFound } from '../utils/api-error.js'
@@ -447,8 +448,7 @@ async function restoreSaleStock(
 }
 
 async function nextRefundNumber(businessAccountId: Types.ObjectId, session?: ClientSession) {
-  const count = await RefundModel.countDocuments({ businessAccountId }).session(session ?? null)
-  return `REF-${String(count + 1).padStart(6, '0')}`
+  return nextDocumentNumber(businessAccountId, 'refund', 'REF-', 'refundNumber', RefundModel as never, session)
 }
 
 export function serializeSale(sale: { toObject(options?: unknown): unknown }, context: RequestContext) {
@@ -479,8 +479,7 @@ export function serializeSale(sale: { toObject(options?: unknown): unknown }, co
 }
 
 async function nextSaleNumber(businessAccountId: Types.ObjectId, session?: ClientSession) {
-  const count = await SaleModel.countDocuments({ businessAccountId }).session(session ?? null)
-  return `SALE-${String(count + 1).padStart(6, '0')}`
+  return nextDocumentNumber(businessAccountId, 'sale', 'SALE-', 'saleNumber', SaleModel as never, session)
 }
 
 function requireManagerRole(context: RequestContext) {
