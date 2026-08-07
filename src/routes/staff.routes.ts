@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { acceptInvitation, activate, cancelInvitation, create, createInvitation, createLog, disableTwoFactor, get, list, listInvitations, logs, lookupInvitation, remove, setupTwoFactor, update, verifyTwoFactor } from '../controllers/staff.controller.js'
+import { acceptInvitation, activate, cancelInvitation, create, createInvitation, createLog, disableTwoFactor, get, list, listInvitations, listMyInvitations, logs, lookupInvitation, remove, resendMyPendingInvitation, setupTwoFactor, update, verifyTwoFactor } from '../controllers/staff.controller.js'
 import { requireBusinessContext, requireWriteAccess } from '../middleware/auth.js'
 
 // Public, token-gated lookup so an invitee can see what they were invited to
@@ -12,6 +12,10 @@ export const staffRouter = Router()
 
 // Accept needs an authenticated user but no business context yet (they aren't a member until accept).
 staffRouter.post('/invitations/accept', acceptInvitation)
+// Same for an invitee checking / re-sending their own pending invitations (e.g. after they
+// signed up through the normal flow instead of the invite link).
+staffRouter.get('/invitations/pending', listMyInvitations)
+staffRouter.post('/invitations/pending/:invitationId/resend', resendMyPendingInvitation)
 staffRouter.use(requireBusinessContext)
 staffRouter.get('/invitations', listInvitations)
 staffRouter.post('/invitations', requireWriteAccess, createInvitation)

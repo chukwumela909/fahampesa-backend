@@ -150,6 +150,81 @@ export async function lookupStaffInvitation(token: string) {
   }
 }
 
+/**
+ * Pending invitations addressed to the signed-in user's own email. Auth-only (no business
+ * context) — invitees have no membership yet. Lets the app recognise an invited staff
+ * member who signed up through the normal flow and keep them out of business onboarding.
+ */
+export async function listMyPendingInvitations(context: RequestContext) {
+  const email = context.auth.email?.toLowerCase()
+  if (!email) return []
+
+  const invitations = await StaffInvitationModel.find({
+    email,
+    status: 'pending',
+    expiresAt: { $gt: new Date() }
+  }).sort({ createdAt: -1 })
+  if (!invitations.length) return []
+
+  const accountIds = [...new Set(invitations.map((inv) => inv.businessAccountId.toString()))]
+  const branchIds = [...new Set(invitations.flatMap((inv) => inv.assignedBranchIds.map((id) => id.toString())))]
+  const [accounts, branches] = await Promise.all([
+    BusinessAccountModel.find({ _id: { $in: accountIds.map((id) => new Types.ObjectId(id)) } }).select('businessName').lean(),
+    BranchModel.find({ _id: { $in: branchIds.map((id) => new Types.ObjectId(id)) } }).select('name').lean()
+  ])
+  const accountNames = new Map(accounts.map((account) => [account._id.toString(), account.businessName]))
+  const branchNames = new Map(branches.map((branch) => [branch._id.toString(), branch.name]))
+
+  return invitations.map((invitation) => ({
+    id: invitation._id.toString(),
+    businessName: accountNames.get(invitation.businessAccountId.toString()) ?? 'a business',
+    role: invitation.role,
+    branchNames: invitation.assignedBranchIds
+      .map((id) => branchNames.get(id.toString()))
+      .filter((name): name is string => Boolean(name)),
+    expiresAt: invitation.expiresAt.toISOString()
+  }))
+}
+
+/**
+ * Re-send an invitation email to the signed-in user themselves. Only the token HASH is
+ * stored, so the original link can't be reconstructed — we rotate the token and email the
+ * new link. Safe without further checks because the mail only ever goes to the invited
+ * address, which must equal the caller's own email.
+ */
+export async function resendMyInvitation(context: RequestContext, invitationId: Types.ObjectId) {
+  const email = context.auth.email?.toLowerCase()
+  const invitation = await StaffInvitationModel.findById(invitationId).select('+tokenHash')
+  if (!invitation || !email || invitation.email !== email) {
+    throw new ApiError(404, 'invitation_not_found', 'Staff invitation not found')
+  }
+  if (invitation.status !== 'pending') {
+    throw new ApiError(409, 'invitation_not_pending', 'Staff invitation is no longer pending')
+  }
+  if (invitation.expiresAt.getTime() <= Date.now()) {
+    throw new ApiError(410, 'invitation_expired', 'Staff invitation has expired')
+  }
+
+  const rawToken = crypto.randomBytes(32).toString('base64url')
+  invitation.tokenHash = hashInvitationToken(rawToken)
+  await invitation.save()
+
+  const [account, branches] = await Promise.all([
+    BusinessAccountModel.findById(invitation.businessAccountId).select('businessName').lean(),
+    BranchModel.find({ _id: { $in: invitation.assignedBranchIds } }).select('name').lean()
+  ])
+  const emailSent = await sendStaffInvitationEmail({
+    to: invitation.email,
+    businessName: account?.businessName ?? 'a business',
+    role: invitation.role,
+    branchNames: branches.map((branch) => branch.name),
+    inviteUrl: buildInviteUrl(rawToken),
+    expiresAt: invitation.expiresAt
+  })
+
+  return { emailSent }
+}
+
 export async function acceptStaffInvitation(context: RequestContext, token: string) {
   const tokenHash = hashInvitationToken(token)
   const invitation = await StaffInvitationModel.findOne({ tokenHash }).select('+tokenHash')

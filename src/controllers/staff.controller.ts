@@ -4,7 +4,7 @@ import { asyncHandler } from '../utils/async-handler.js'
 import { objectIdSchema, toObjectId } from '../validators/common.js'
 import { activityLogQuerySchema, acceptStaffInvitationSchema, createActivityLogSchema, createStaffInvitationSchema, createStaffSchema, staffInvitationListQuerySchema, staffListQuerySchema, updateStaffSchema, verifyTwoFactorSchema } from '../validators/staff.validator.js'
 import { activateStaff, createStaff, deactivateStaff, deleteStaff, disableStaffTwoFactor, getStaff, listStaff, listStaffActivityLogs, setupStaffTwoFactor, updateStaff, verifyStaffTwoFactor, writeStaffActivity } from '../services/staff.service.js'
-import { acceptStaffInvitation, cancelStaffInvitation, inviteStaff, listStaffInvitations, lookupStaffInvitation } from '../services/staff-invitation.service.js'
+import { acceptStaffInvitation, cancelStaffInvitation, inviteStaff, listMyPendingInvitations, listStaffInvitations, lookupStaffInvitation, resendMyInvitation } from '../services/staff-invitation.service.js'
 import { ApiError } from '../utils/api-error.js'
 
 export const list = asyncHandler(async (req: AppRequest, res: Response) => {
@@ -29,6 +29,15 @@ export const listInvitations = asyncHandler(async (req: AppRequest, res: Respons
 
 export const cancelInvitation = asyncHandler(async (req: AppRequest, res: Response) => {
   res.json({ data: await cancelStaffInvitation(req.context!, staffId(req)) })
+})
+
+export const listMyInvitations = asyncHandler(async (req: AppRequest, res: Response) => {
+  res.json({ data: await listMyPendingInvitations(req.context!) })
+})
+
+export const resendMyPendingInvitation = asyncHandler(async (req: AppRequest, res: Response) => {
+  const invitationId = toObjectId(objectIdSchema.parse(req.params.invitationId))
+  res.json({ data: await resendMyInvitation(req.context!, invitationId) })
 })
 
 export const acceptInvitation = asyncHandler(async (req: AppRequest, res: Response) => {
