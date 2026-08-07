@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { create, disable, enable, get, list, remove, update } from '../controllers/branch.controller.js'
-import { requireBusinessContext, requireRecentAuth, requireWriteAccess } from '../middleware/auth.js'
+import { requireBusinessContext, requirePaidPlan, requireRecentAuth, requireWriteAccess } from '../middleware/auth.js'
 import { inventoryRouter } from './inventory.routes.js'
 import { productRouter } from './product.routes.js'
 import { debtorRouter } from './debtor.routes.js'
@@ -20,9 +20,9 @@ branchRouter.get('/:branchId/dashboard', branchDashboard)
 branchRouter.use('/:branchId/products', productRouter)
 branchRouter.use('/:branchId/inventory', inventoryRouter)
 branchRouter.use('/:branchId/sales', saleRouter)
-branchRouter.use('/:branchId/expenses', expenseRouter)
-branchRouter.use('/:branchId/debtors', debtorRouter)
-branchRouter.use('/:branchId/suppliers', supplierRouter)
+branchRouter.use('/:branchId/expenses', requirePaidPlan, expenseRouter)
+branchRouter.use('/:branchId/debtors', requirePaidPlan, debtorRouter)
+branchRouter.use('/:branchId/suppliers', requirePaidPlan, supplierRouter)
 branchRouter.use('/:branchId/purchase-orders', purchaseOrderRouter)
 branchRouter.get('/:branchId', get)
 branchRouter.patch('/:branchId', requireWriteAccess, update)

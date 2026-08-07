@@ -91,6 +91,29 @@ export function requireWriteAccess(req: AppRequest, _res: Response, next: NextFu
   next()
 }
 
+// Debtors, expenses, and suppliers are Pro-only: free accounts get no access at all
+// (reads included), matching the web app's full-page PlanGate. subscriptionStatus here is
+// the effective status (auth middleware derives it), so 'active' implies a live end date.
+export function requirePaidPlan(req: AppRequest, _res: Response, next: NextFunction) {
+  if (!req.context?.businessAccountId || !req.context.planTier || !req.context.subscriptionStatus) {
+    next(new ApiError(403, 'business_required', 'Business context required'))
+    return
+  }
+
+  const hasActivePaidAccess =
+    req.context.planTier === 'paid' &&
+    req.context.subscriptionStatus === 'active' &&
+    !!req.context.subscriptionEndsAt &&
+    req.context.subscriptionEndsAt.getTime() > Date.now()
+
+  if (!hasActivePaidAccess) {
+    next(new ApiError(403, 'plan_upgrade_required', 'This feature requires an active Pro subscription'))
+    return
+  }
+
+  next()
+}
+
 export function requireRecentAuth(maxAgeMs = 5 * 60 * 1000) {
   return (req: AppRequest, _res: Response, next: NextFunction) => {
     const authTime = req.context?.auth.authTime
